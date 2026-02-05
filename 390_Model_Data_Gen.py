@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import time
-from itertools import product, islice
 
 start_time = time.time()
 
@@ -9,11 +8,11 @@ start_time = time.time()
 #A few ways to approach the input data generation portion: could go fully random within range & then trim (which is what this code does currently)
 #or alternatively, do stricter compatibilty check before, then generate inputs within known useful range (would probably be more efficient)
 
-crank_length = np.arange(100,250,0.1, dtype='f8')
+crank_length = np.arange(100,250,0.5, dtype='f8') #Range of all possible crank lengths, syntax is (min,max,step)
 
-link_length = np.arange(100,250,0.1, dtype='f8') #using dtype='f8', a.k.a fp64 in order to maintain max precision. f4 might be faster
+link_length = np.arange(100,250,0.5, dtype='f8') #using dtype='f8', a.k.a fp64 in order to maintain max precision. f4 might be faster
 
-offset = np.arange(0.1,30,0.1, dtype='f8')
+offset = np.arange(0.1,30,0.5, dtype='f8') #Currently using step size of 0.5mm for all lengths, could be adjusted up or down based on machining tolerance & whatnot
 
 crank_grid, offset_grid = np.meshgrid(crank_length, offset)
 
@@ -56,21 +55,30 @@ for link in link_length:
     g_s_s_offset_grid = g_s_offset_grid[stroke_mask]
 #--------------
 
+#Calculate return ratio
+    alpha_angle = (np.asin(g_s_s_offset_grid/(link-g_s_s_crank_grid)) + np.asin(g_s_s_offset_grid/(link + g_s_s_crank_grid)))
+
+    return_ratio = ((np.pi+alpha_angle)/(np.pi-alpha_angle))
+
+    return_ratio_mask = return_ratio >= 1.5
+
+    return_ratio_grid = return_ratio[return_ratio_mask]
+
+    g_s_s_r_crank_grid = g_s_s_crank_grid[return_ratio_mask]
+
+    g_s_s_r_offset_grid = g_s_s_offset_grid[return_ratio_mask]
+
     batch_df = pd.DataFrame({
-        "Crank": g_s_s_crank_grid,
+        "Crank": g_s_s_r_crank_grid,
         "Link": link,
-        "Offset": g_s_s_offset_grid        
+        "Offset": g_s_s_r_offset_grid,
+        "Return Ratio": return_ratio_grid
+             
     }) #create dataframe of all data in batch
 
     filtered_parameters.append(batch_df)
 
 final_param_output = pd.concat(filtered_parameters, ignore_index=True)
-
-
-#Calculate return ratio
-alpha_angle = (np.asin(final_param_output["Offset"]/(final_param_output["Link"]-final_param_output["Crank"])) + np.asin(final_param_output["Offset"]/(final_param_output["Link"] + final_param_output["Crank"])))
-
-final_param_output["Return_Ratio"] = ((np.pi+alpha_angle)/(np.pi-alpha_angle))
 
 print(final_param_output)
 
