@@ -6,83 +6,80 @@ from itertools import product, islice
 start_time = time.time()
 
 #np.arange creates an array of numbers with specified step size
-#A few ways to approach the input data generation portion: could go fully random within range & then trim
-# or alternatively, do stricter compatibilty check before, then generate inputs within known useful range
-
+#A few ways to approach the input data generation portion: could go fully random within range & then trim (which is what this code does currently)
+#or alternatively, do stricter compatibilty check before, then generate inputs within known useful range (would probably be more efficient)
 
 crank_length = np.arange(100,250,0.1, dtype='f8')
 
-link_length = np.arange(100,250,0.1, dtype='f8') #using dtype='f8', a.k.a fp64 in order to maintain max precision. f4 would probably work too, maybe even f2
+link_length = np.arange(100,250,0.1, dtype='f8') #using dtype='f8', a.k.a fp64 in order to maintain max precision. f4 might be faster
 
-offset = np.arange(0.1,20,0.1, dtype='f8')
+offset = np.arange(0.1,30,0.1, dtype='f8')
 
-#product() combines the above arrays into all possible permutations. Need to chunk the permutations for filtering, otherwise run out of ram
-all_permutations = product(crank_length, link_length, offset)
+crank_grid, offset_grid = np.meshgrid(crank_length, offset)
 
-filtered_permutations = [] #permutations which pass all checks end up in here
+filtered_parameters = []
 
-batch_size = 1000000
-while True:
+for link in link_length:
+#Grashof condition check
+    grashof_mask = (crank_grid + offset_grid <= link)
 
-    permutations_batch = list(islice(all_permutations, batch_size))
-    if not permutations_batch:
-        break
+    if not np.any(grashof_mask): #checks to make sure that at least one value meets grashof condition
+        continue
 
-    batch_df = pd.DataFrame(permutations_batch, columns=["Crank","Link","Offset"]) #create dataframe of all data in batch
+    g_crank_grid = crank_grid[grashof_mask]
 
-        #Create a new column based on checking for Grashof's mobility condition r + e <= L
-    batch_df["Grashof"] = np.where(
-        batch_df["Crank"] + batch_df["Offset"] <= batch_df["Link"],
-        "True",
-        "False"
-    )
+    g_offset_grid = offset_grid[grashof_mask]
+#-------------
 
-    batch_df = (batch_df[batch_df.Grashof == "True"]) # filter dataframe for Grashof Condition
+#Stroke distance conditoin check
+    stroke_condition_term_1 = (g_crank_grid + link)**2 - g_offset_grid**2
 
-
-    #Stroke length calculation = sqrt[(r+L)^2-e^2] - sqrt[(r-L)^2-e^2]
-    #Calculating the first and second terms in the square roots
-    stroke_condition_term_1 = (batch_df["Crank"]+batch_df["Link"])**2-batch_df["Offset"]**2
-
-    stroke_condition_term_2 = (batch_df["Crank"]-batch_df["Link"])**2-batch_df["Offset"]**2
+    stroke_condition_term_2 = (g_crank_grid - link)**2 - g_offset_grid**2
 
     #Checking for which values the terms in the square root would actually be positive (i.e physically possible)
-    stroke_condition_positive = (stroke_condition_term_1 >= 0) & (stroke_condition_term_2 >= 0)
+    stroke_condition_positive_mask = (stroke_condition_term_1 >= 0) & (stroke_condition_term_2 >= 0)
 
-    #Calculating square roots avoiding error by rounding negatives to zero
-    stroke_value = np.sqrt(stroke_condition_term_1.clip(lower = 0))-np.sqrt(stroke_condition_term_2.clip(lower = 0))
+    g_s_crank_grid = g_crank_grid[stroke_condition_positive_mask] #mask the grids to match dimensions of stroke_mask for further masking. Need to clean up names a bit
 
-    #find stroke distance, then discard all that aren't within 0.1mm of target distance
-    batch_df["Stroke"] = np.where(
-        stroke_condition_positive & (stroke_value >= 249.9) & (stroke_value <= 250.1),
-        "True",
-        "False"
-    )
+    g_s_offset_grid = g_offset_grid[stroke_condition_positive_mask]
 
-    batch_df = (batch_df[batch_df.Stroke == "True"]) #filter dataframe for Stroke condition
-    
-    #Calculate return ratio
-    batch_df["Alpha"] = (np.asin(batch_df["Offset"]/(batch_df["Link"]-batch_df["Crank"])) + np.asin(batch_df["Offset"]/(batch_df["Link"] + batch_df["Crank"])))
+    #Calculating square roots avoiding error by masking any negative values
+    stroke = np.sqrt(stroke_condition_term_1[stroke_condition_positive_mask])-np.sqrt(stroke_condition_term_2[stroke_condition_positive_mask])
 
-    batch_df["Return_Ratio"] = ((np.pi+batch_df["Alpha"])/(np.pi-batch_df["Alpha"]))
+    stroke_mask = (stroke >= 249.9) & (stroke <= 250.1)
 
-    batch_df = (batch_df[batch_df.Return_Ratio >= 1.5]) #filter dataframe for Return ratio condition (greater than 1.5)
+    if not np.any(stroke_mask): #check to ensure at least one valid stroke condition
+        continue
+
+    g_s_s_crank_grid = g_s_crank_grid[stroke_mask]
+
+    g_s_s_offset_grid = g_s_offset_grid[stroke_mask]
+#--------------
+
+    batch_df = pd.DataFrame({
+        "Crank": g_s_s_crank_grid,
+        "Link": link,
+        "Offset": g_s_s_offset_grid        
+    }) #create dataframe of all data in batch
+
+    filtered_parameters.append(batch_df)
+
+final_param_output = pd.concat(filtered_parameters, ignore_index=True)
 
 
-    filtered_permutations.append(batch_df) #add filtered rows to the output list
-    
+#Calculate return ratio
+alpha_angle = (np.asin(final_param_output["Offset"]/(final_param_output["Link"]-final_param_output["Crank"])) + np.asin(final_param_output["Offset"]/(final_param_output["Link"] + final_param_output["Crank"])))
 
+final_param_output["Return_Ratio"] = ((np.pi+alpha_angle)/(np.pi-alpha_angle))
 
-
-filtered_parameters_df = pd.concat(filtered_permutations, ignore_index=True)
-
-print(filtered_parameters_df)
+print(final_param_output)
 
 #Save the dataframe to a csv 
-filtered_parameters_df.to_csv("parameters.csv", index=False, float_format='%.4f') 
+
+final_param_output.to_csv("parameters.csv", index=False, float_format='%.4f') 
 
 end_time = time.time()
 
 execution_time = end_time-start_time
 
-print('Program Execution time was ' + str(execution_time/60) + ' minutes')
+print('Program Execution time was ' + str(execution_time) + ' seconds')
