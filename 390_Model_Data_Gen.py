@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import time
 
+start_time = time.time()
+
 delta_t = (1/12) #(np.pi/12)/(30*2*np.pi/60) defining as global variable, unit is seconds, (Angle Step Size)/(Rad/s) = s
 
 #----- Function definitions -----
@@ -27,12 +29,19 @@ def slider_acceleration(crank_radius, link_length, offset, crank_angle):
     return As
 
 #Calculates total cross-sectional area occupied by the slider crank mechanism in xy plane, disregarding slider size (currently)
-def cross_sectional_area(crank_radius, link_length, offset):
+def mechanism_xy_area(crank_radius, link_length, offset):
     area = 2*crank_radius*(crank_radius+np.sqrt((crank_radius+link_length)**2-offset**2))
     return area
 
+#Calculate normal stress in link
+def normal_stress(normal_force, link_width, link_height):
+    stress = normal_force/(link_width*link_height)
+    return stress
 
-start_time = time.time()
+def angle_phi(crank_radius, link_length, offset, crank_angle):
+    phi = np.sin((crank_radius*np.sin(crank_angle)+offset)/link_length)
+    return phi
+#--------------
 
 #np.arange creates an array of numbers with specified step size
 #Currently just creating all possible combinations, then doing a sweep and filtering out parameters which don't meet criteria
@@ -67,7 +76,7 @@ for link in link_length: #loops through all link length values, combined with ab
 
     stroke_condition_term_2 = (g_crank_grid - link)**2 - g_offset_grid**2
 
-    #Checking for which values the terms in the square root would actually be positive (i.e physically possible)
+    #Checking for which values the terms in the square root are positive (i.e physically possible)
     stroke_condition_positive_mask = (stroke_condition_term_1 >= 0) & (stroke_condition_term_2 >= 0)
 
     g_s_crank_grid = g_crank_grid[stroke_condition_positive_mask] #mask the grids to match dimensions of stroke_mask for further masking
@@ -92,7 +101,9 @@ for link in link_length: #loops through all link length values, combined with ab
 
     return_ratio = ((np.pi+alpha_angle)/(np.pi-alpha_angle))
 
-    return_ratio_mask = return_ratio >= 1.5
+
+    return_ratio_mask = (return_ratio >= 1.5) & (return_ratio <= 2.5) #filters for return ratio within specified range. This could potentially be uncapped
+    #and values greater than 2.5 would likely be filtered out later during stress analysis
 
     if not np.any(return_ratio_mask): #check to ensure at least one valid return_ratio condition, otherwise skip to next link
         continue
@@ -105,7 +116,7 @@ for link in link_length: #loops through all link length values, combined with ab
 #---------------
 
 #Calculate cross-sectional area of crank-slider mechanism
-    xy_area = cross_sectional_area(g_s_s_r_crank_grid,link,g_s_s_r_offset_grid) #mm^2
+    xy_area = mechanism_xy_area(g_s_s_r_crank_grid,link,g_s_s_r_offset_grid) #mm^2
 
 #--------------
 
@@ -135,22 +146,32 @@ kinematic_data = []
 
 parameters_matrix = final_param_output[["Crank","Link","Offset"]].to_numpy()
 
-#Actually should do this in the opposite direction (e.g loop through link lengths say, and have the angle be one of the matrices. Might be another np.meshgrid situation)
+#Goes row by row through parameter combinations previously filtered, then calculates kinematics for each angle
 for row in parameters_matrix:
     for angle in angle_inputs_rad:
         kinematic_batch =[
             row[0], #crank
             row[1], #link
             row[2], #offset
-            np.rad2deg(angle),
+            np.rad2deg(angle), #theta
+            np.rad2deg(angle_phi(row[0], row[1], row[2], angle)), #phi
+            normal_stress((9.81*0.5/np.cos(angle_phi(row[0], row[1], row[2], angle))),5,5), #link normal stress, (N,mm,mm) --> MPa
             slider_displacement(row[0], row[1], row[2], angle), #Xs
             slider_velocity(row[0], row[1], row[2], angle), #Vs
             slider_acceleration(row[0], row[1], row[2], angle) #As
             ]
         kinematic_data.append(kinematic_batch)
-    kinematic_data.append("")
+    kinematic_data.append("") #Buffer to visually separate one batch from the next
 
-final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius", "Link Length", "Offset","Angle", "Xs", "Vs", "As"]) #format final dataframe
+final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius",
+                                                                 "Link Length",
+                                                                 "Offset",
+                                                                 "Theta Angle",
+                                                                 "Phi Angle",
+                                                                 "Link Normal Stress",
+                                                                 "Xs",
+                                                                 "Vs",
+                                                                 "As"]) #format final dataframe
 
 print(final_kinematic_output)
 
