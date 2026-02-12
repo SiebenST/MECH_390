@@ -54,6 +54,10 @@ def link_reaction_force(slider_mass, slider_acceleration, angle_phi, coefficient
     link_reaction_force = (slider_normal_force-slider_mass*9.81)/np.sin(angle_phi)
     return link_reaction_force
 
+#Calculate torque on crank
+def crank_torque(force_magnitude, crank_radius, theta_angle, phi_angle):
+    torque = force_magnitude*crank_radius*(np.cos(phi_angle)*np.sin(theta_angle)+np.sin(phi_angle)*np.cos(theta_angle))
+    return torque
 #--------------
 
 #np.arange creates an array of numbers with specified step size
@@ -146,7 +150,7 @@ final_param_output = pd.concat(filtered_parameters, ignore_index=True) #format f
 
 print(final_param_output)
 
-final_param_output.to_csv("parameters.csv", index=False, float_format='%.3f') #exports data to a .csv spreadsheet
+final_param_output.to_csv("parameters.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 
 #Kinematics Analysis
 angle_inputs_deg = np.arange(15,360+15,15, dtype='f8')
@@ -160,17 +164,21 @@ parameters_matrix = final_param_output[["Crank","Link","Offset"]].to_numpy()
 #Goes row by row through parameter combinations previously filtered, then calculates kinematics for each angle
 for row in parameters_matrix:
     for angle in angle_inputs_rad:
-        x_s = slider_displacement(row[0], row[1], row[2], angle) #unit
-        v_s = slider_velocity(row[0], row[1], row[2], angle) #unit/s
-        a_s = slider_acceleration(row[0], row[1], row[2], angle) #unit/s^2
-        phi = angle_phi(row[0], row[1], row[2], angle) #rad
+        crank = row[0]
+        link = row[1]
+        offset = row[2]
+        x_s = slider_displacement(crank, link, offset, angle) #unit
+        v_s = slider_velocity(crank, link, offset, angle) #unit/s
+        a_s = slider_acceleration(crank, link, offset, angle) #unit/s^2
+        phi = angle_phi(crank, link, offset, angle) #rad
         kinematic_batch =[
-            row[0], #crank
-            row[1], #link
-            row[2], #offset
+            crank, #crank
+            link, #link
+            offset, #offset
             np.rad2deg(angle), #theta, degrees
             np.rad2deg(phi), #phi, degrees
-            normal_stress(link_reaction_force(0.5,a_s,phi,0.1), 5, 5), #N, mm, mm --> MPa
+            normal_stress(link_reaction_force(0.5, a_s, phi, 0.1), 5, 5), #N, mm, mm --> MPa
+            crank_torque(link_reaction_force(0.5, a_s, phi, 0.1), crank, angle, phi),
             x_s, #Xs
             v_s, #Vs
             a_s #As
@@ -183,13 +191,14 @@ final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius",
                                                                  "Theta Angle",
                                                                  "Phi Angle",
                                                                  "Link Normal Stress",
+                                                                 "Torque",
                                                                  "Xs",
                                                                  "Vs",
                                                                  "As"]) #format final dataframe
 
 print(final_kinematic_output)
 
-final_kinematic_output.to_csv("kinematics.csv", index=False, float_format='%.3f') #exports data to a .csv spreadsheet
+final_kinematic_output.to_csv("kinematics_dynamics.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 
 end_time = time.time()
 
