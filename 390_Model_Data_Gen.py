@@ -10,23 +10,23 @@ delta_t = (1/12) #(np.pi/12)/(30*2*np.pi/60) defining as global variable, unit i
 
 #Calculates the position of the slider relative to the base of the crank for given set of input parameters
 def slider_displacement(crank_radius, link_length, offset, crank_angle):
-    Xs = np.sqrt(link_length**2-(offset+crank_radius*np.sin(crank_angle)))+crank_radius*np.cos(crank_angle)
-    return Xs
+    X_s = np.sqrt(link_length**2-(offset+crank_radius*np.sin(crank_angle))**2)+crank_radius*np.cos(crank_angle)
+    return X_s
 
 #Calculates the velocity of the slider relative to the base of the crank for given set of input parameters
 def slider_velocity(crank_radius, link_length, offset, crank_angle):
-    position_before = slider_displacement(crank_radius, link_length, offset, crank_angle - np.pi/12)
-    position_after = slider_displacement(crank_radius, link_length, offset, crank_angle + np.pi/12)
-    Vs = position_after-position_before/(2*delta_t)
-    return Vs
+    position_before = slider_displacement(crank_radius, link_length, offset, (crank_angle - np.pi/12))
+    position_after = slider_displacement(crank_radius, link_length, offset, (crank_angle + np.pi/12))
+    V_s = (position_after-position_before)/(2*delta_t)
+    return V_s
 
 #Calculates the acceleration of the slider relative to the base of the crank for given set of input parameters
 def slider_acceleration(crank_radius, link_length, offset, crank_angle):
-    velocity_before = slider_velocity(crank_radius, link_length, offset, crank_angle - np.pi/12)
+    velocity_before = slider_velocity(crank_radius, link_length, offset, (crank_angle - np.pi/12))
     velocity_now = slider_velocity(crank_radius, link_length, offset, crank_angle)
-    velocity_after = slider_velocity(crank_radius, link_length, offset, crank_angle +  np.pi/12)
-    As = (velocity_after-2*velocity_now+velocity_before)/delta_t
-    return As
+    velocity_after = slider_velocity(crank_radius, link_length, offset, (crank_angle +  np.pi/12))
+    A_s = (velocity_after-2*velocity_now+velocity_before)/delta_t
+    return A_s
 
 #Calculates total cross-sectional area occupied by the slider crank mechanism in xy plane, disregarding slider size (currently)
 def mechanism_xy_area(crank_radius, link_length, offset):
@@ -38,19 +38,32 @@ def normal_stress(normal_force, link_width, link_height):
     stress = normal_force/(link_width*link_height)
     return stress
 
+#Calculate angle of link relative to horizontal plance
 def angle_phi(crank_radius, link_length, offset, crank_angle):
-    phi = np.sin((crank_radius*np.sin(crank_angle)+offset)/link_length)
+    phi = np.asin((crank_radius*np.sin(crank_angle)+offset)/link_length)
     return phi
+
+#Calculate shear stress in pin
+def pin_shear_stress(shear_force, pin_radius):
+    stress = shear_force/(np.pi*pin_radius**2) 
+    return stress
+
+#Calculate normal stress in link
+def link_reaction_force(slider_mass, slider_acceleration, angle_phi, coefficient_mu):
+    slider_normal_force = (slider_mass*slider_acceleration+slider_mass*9.81*1/np.tan(angle_phi))/(1/np.tan(angle_phi)-coefficient_mu)
+    link_reaction_force = (slider_normal_force-slider_mass*9.81)/np.sin(angle_phi)
+    return link_reaction_force
+
 #--------------
 
 #np.arange creates an array of numbers with specified step size
 #Currently just creating all possible combinations, then doing a sweep and filtering out parameters which don't meet criteria
 
-crank_length = np.arange(10,300,0.5, dtype='f8') #Range of all possible crank lengths to check, syntax is (min,max,step)
+crank_length = np.arange(10,300,0.5, dtype='f8')*10**-3 #Range of all possible crank lengths to check, syntax is (min,max,step)
 
-link_length = np.arange(10,300,0.5, dtype='f8') #using dtype='f8', a.k.a fp64 in order to maintain max precision. f4 (fp32) might be faster
+link_length = np.arange(10,300,0.5, dtype='f8')*10**-3 #using dtype='f8', a.k.a fp64 in order to maintain max precision. f4 (fp32) might be faster
 
-offset = np.arange(0.5,50,0.5, dtype='f8') #Using step size of 0.5mm for all lengths, could be adjusted up/down based on machining tolerance & whatnot
+offset = np.arange(0.5,50,0.5, dtype='f8')*10**-3 #Using step size of 0.5mm for all lengths, could be adjusted up/down based on machining tolerance & whatnot
 
 crank_grid, offset_grid = np.meshgrid(crank_length, offset) #meshgrid creates two large matrices. 
 #The first input vector is taken as a row which is then copied vertically a number of times equal to the second vector's length. 
@@ -86,7 +99,7 @@ for link in link_length: #loops through all link length values, combined with ab
     #Calculating square roots avoiding program error by masking out any negative values
     stroke = np.sqrt(stroke_condition_term_1[stroke_condition_positive_mask])-np.sqrt(stroke_condition_term_2[stroke_condition_positive_mask])
 
-    stroke_mask = (stroke >= 249.9) & (stroke <= 250.1)
+    stroke_mask = (stroke >= 249.99*10**-3) & (stroke <= 250.01*10**-3)
 
     if not np.any(stroke_mask): #check to ensure at least one valid stroke condition
         continue
@@ -97,10 +110,9 @@ for link in link_length: #loops through all link length values, combined with ab
 #--------------
 
 #Calculate return ratio
-    alpha_angle = (np.asin(g_s_s_offset_grid/(link-g_s_s_crank_grid)) + np.asin(g_s_s_offset_grid/(link + g_s_s_crank_grid)))
+    alpha_angle = (np.asin(g_s_s_offset_grid/(link-g_s_s_crank_grid)) - np.asin(g_s_s_offset_grid/(link + g_s_s_crank_grid)))
 
     return_ratio = ((np.pi+alpha_angle)/(np.pi-alpha_angle))
-
 
     return_ratio_mask = (return_ratio >= 1.5) & (return_ratio <= 2.5) #filters for return ratio within specified range. This could potentially be uncapped
     #and values greater than 2.5 would likely be filtered out later during stress analysis
@@ -117,7 +129,6 @@ for link in link_length: #loops through all link length values, combined with ab
 
 #Calculate cross-sectional area of crank-slider mechanism
     xy_area = mechanism_xy_area(g_s_s_r_crank_grid,link,g_s_s_r_offset_grid) #mm^2
-
 #--------------
 
     batch_df = pd.DataFrame({
@@ -149,19 +160,22 @@ parameters_matrix = final_param_output[["Crank","Link","Offset"]].to_numpy()
 #Goes row by row through parameter combinations previously filtered, then calculates kinematics for each angle
 for row in parameters_matrix:
     for angle in angle_inputs_rad:
+        x_s = slider_displacement(row[0], row[1], row[2], angle) #unit
+        v_s = slider_velocity(row[0], row[1], row[2], angle) #unit/s
+        a_s = slider_acceleration(row[0], row[1], row[2], angle) #unit/s^2
+        phi = angle_phi(row[0], row[1], row[2], angle) #rad
         kinematic_batch =[
             row[0], #crank
             row[1], #link
             row[2], #offset
-            np.rad2deg(angle), #theta
-            np.rad2deg(angle_phi(row[0], row[1], row[2], angle)), #phi
-            normal_stress((9.81*0.5/np.cos(angle_phi(row[0], row[1], row[2], angle))),5,5), #link normal stress, (N,mm,mm) --> MPa
-            slider_displacement(row[0], row[1], row[2], angle), #Xs
-            slider_velocity(row[0], row[1], row[2], angle), #Vs
-            slider_acceleration(row[0], row[1], row[2], angle) #As
+            np.rad2deg(angle), #theta, degrees
+            np.rad2deg(phi), #phi, degrees
+            normal_stress(link_reaction_force(0.5,a_s,phi,0.1), 5, 5), #N, mm, mm --> MPa
+            x_s, #Xs
+            v_s, #Vs
+            a_s #As
             ]
         kinematic_data.append(kinematic_batch)
-    kinematic_data.append("") #Buffer to visually separate one batch from the next
 
 final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius",
                                                                  "Link Length",
