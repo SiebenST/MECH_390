@@ -103,7 +103,7 @@ for link in link_length: #loops through all link length values, combined with ab
     #Calculating square roots avoiding program error by masking out any negative values
     stroke = np.sqrt(stroke_condition_term_1[stroke_condition_positive_mask])-np.sqrt(stroke_condition_term_2[stroke_condition_positive_mask])
 
-    stroke_mask = (stroke >= 249.99*10**-3) & (stroke <= 250.01*10**-3)
+    stroke_mask = (stroke >= 249.9*10**-3) & (stroke <= 250.1*10**-3) #the tolerance here drastically affects the amount of parameter sets which filter through
 
     if not np.any(stroke_mask): #check to ensure at least one valid stroke condition
         continue
@@ -153,7 +153,7 @@ print(final_param_output)
 final_param_output.to_csv("parameters.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 
 #Kinematics Analysis
-angle_inputs_deg = np.arange(15,360+15,15, dtype='f8')
+angle_inputs_deg = np.arange(1,360+1,1, dtype='f8') #moved to 1 deg increments, 15 is too coarse to be useful
 
 angle_inputs_rad = np.deg2rad(angle_inputs_deg)
 
@@ -164,6 +164,8 @@ parameters_matrix = final_param_output[["Crank","Link","Offset"]].to_numpy()
 #Goes row by row through parameter combinations previously filtered, then calculates kinematics for each angle
 for row in parameters_matrix:
     for angle in angle_inputs_rad:
+        slider_mass = 0.5 #Kg
+        friction_coefficient_mu = 0.1  
         crank = row[0]
         link = row[1]
         offset = row[2]
@@ -171,14 +173,16 @@ for row in parameters_matrix:
         v_s = slider_velocity(crank, link, offset, angle) #unit/s
         a_s = slider_acceleration(crank, link, offset, angle) #unit/s^2
         phi = angle_phi(crank, link, offset, angle) #rad
+        link_force = link_reaction_force(slider_mass, a_s, phi, friction_coefficient_mu)
         kinematic_batch =[
             crank, #crank
             link, #link
             offset, #offset
             np.rad2deg(angle), #theta, degrees
             np.rad2deg(phi), #phi, degrees
-            normal_stress(link_reaction_force(0.5, a_s, phi, 0.1), 5, 5), #N, mm, mm --> MPa
-            crank_torque(link_reaction_force(0.5, a_s, phi, 0.1), crank, angle, phi),
+            normal_stress(link_force, 5, 5), #N, mm, mm --> MPa
+            crank_torque(link_force, crank, angle, phi), #Torque N.m
+            pin_shear_stress(link_force, 2), #N, mm^2 --> MPa
             x_s, #Xs
             v_s, #Vs
             a_s #As
@@ -191,6 +195,7 @@ final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius",
                                                                  "Theta Angle",
                                                                  "Phi Angle",
                                                                  "Link Normal Stress",
+                                                                 "Pin Shear",
                                                                  "Torque",
                                                                  "Xs",
                                                                  "Vs",
