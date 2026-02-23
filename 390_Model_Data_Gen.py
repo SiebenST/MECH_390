@@ -4,7 +4,7 @@ import time
 
 start_time = time.time()
 
-delta_t = (1/12) #(np.pi/12)/(30*2*np.pi/60) defining as global variable, unit is seconds, (Angle Step Size)/(Rad/s) = s
+delta_t = (1/180) #defining as global variable, unit is seconds
 
 #----- Function definitions -----
 
@@ -15,40 +15,42 @@ def slider_displacement(crank_radius, link_length, offset, crank_angle):
 
 #Calculates the velocity of the slider relative to the base of the crank for given set of input parameters
 def slider_velocity(crank_radius, link_length, offset, crank_angle):
-    position_before = slider_displacement(crank_radius, link_length, offset, (crank_angle - np.pi/12))
-    position_after = slider_displacement(crank_radius, link_length, offset, (crank_angle + np.pi/12))
+    position_before = slider_displacement(crank_radius, link_length, offset, (crank_angle - np.pi/180))
+    position_after = slider_displacement(crank_radius, link_length, offset, (crank_angle + np.pi/180))
     V_s = (position_after-position_before)/(2*delta_t)
     return V_s
 
 #Calculates the acceleration of the slider relative to the base of the crank for given set of input parameters
 def slider_acceleration(crank_radius, link_length, offset, crank_angle):
-    velocity_before = slider_velocity(crank_radius, link_length, offset, (crank_angle - np.pi/12))
+    velocity_before = slider_velocity(crank_radius, link_length, offset, (crank_angle - np.pi/180))
     velocity_now = slider_velocity(crank_radius, link_length, offset, crank_angle)
-    velocity_after = slider_velocity(crank_radius, link_length, offset, (crank_angle +  np.pi/12))
-    A_s = (velocity_after-2*velocity_now+velocity_before)/delta_t
+    velocity_after = slider_velocity(crank_radius, link_length, offset, (crank_angle +  np.pi/180))
+    A_s = (velocity_after-2*velocity_now+velocity_before)/(delta_t**2)
     return A_s
-
-#Calculates total cross-sectional area occupied by the slider crank mechanism in xy plane, disregarding slider size (currently)
-def mechanism_xy_area(crank_radius, link_length, offset):
-    area = 2*crank_radius*(crank_radius+np.sqrt((crank_radius+link_length)**2-offset**2))
-    return area
-
-#Calculate normal stress in link
-def normal_stress(normal_force, link_width, link_height):
-    stress = normal_force/(link_width*link_height)
-    return stress
 
 #Calculate angle of link relative to horizontal plance
 def angle_phi(crank_radius, link_length, offset, crank_angle):
     phi = np.asin((crank_radius*np.sin(crank_angle)+offset)/link_length)
     return phi
 
-#Calculate shear stress in pin
-def pin_shear_stress(shear_force, pin_radius):
-    stress = shear_force/(np.pi*pin_radius**2) 
-    return stress
+#Calculates total cross-sectional area occupied by the slider crank mechanism in xy plane, disregarding slider size (currently)
+def mechanism_xy_area(crank_radius, link_length, offset):
+    area = 2*crank_radius*(crank_radius+np.sqrt((crank_radius+link_length)**2-offset**2))
+    return area
 
-#Calculate normal stress in link
+#Calculate required link area for given link load to remain within allowable range
+def link_sizing(link_force, allowable_stress):
+    cross_sectional_area = link_force/allowable_stress
+    link_width = np.sqrt(cross_sectional_area)
+    return link_width
+
+#Calculate required pin size for given pin load
+def pin_sizing(shear_force, allowable_stress):
+    cross_sectional_area = shear_force/allowable_stress
+    pin_radius = np.sqrt(cross_sectional_area/np.pi)
+    return pin_radius
+
+#Calculate force going through link
 def link_reaction_force(slider_mass, slider_acceleration, angle_phi, coefficient_mu):
     slider_normal_force = (slider_mass*slider_acceleration+slider_mass*9.81*1/np.tan(angle_phi))/(1/np.tan(angle_phi)-coefficient_mu)
     link_reaction_force = (slider_normal_force-slider_mass*9.81)/np.sin(angle_phi)
@@ -63,9 +65,9 @@ def crank_torque(force_magnitude, crank_radius, theta_angle, phi_angle):
 #np.arange creates an array of numbers with specified step size
 #Currently just creating all possible combinations, then doing a sweep and filtering out parameters which don't meet criteria
 
-crank_length = np.arange(10,300,0.5, dtype='f8')*10**-3 #Range of all possible crank lengths to check, syntax is (min,max,step)
+crank_length = np.arange(100,300,0.5, dtype='f8')*10**-3 #Range of all possible crank lengths to check, syntax is (min,max,step)
 
-link_length = np.arange(10,300,0.5, dtype='f8')*10**-3 #using dtype='f8', a.k.a fp64 in order to maintain max precision. f4 (fp32) might be faster
+link_length = np.arange(100,300,0.5, dtype='f8')*10**-3 #using dtype='f8', a.k.a fp64 in order to maintain max precision. f4 (fp32) might be faster
 
 offset = np.arange(0.5,50,0.5, dtype='f8')*10**-3 #Using step size of 0.5mm for all lengths, could be adjusted up/down based on machining tolerance & whatnot
 
@@ -132,7 +134,7 @@ for link in link_length: #loops through all link length values, combined with ab
 #---------------
 
 #Calculate cross-sectional area of crank-slider mechanism
-    xy_area = mechanism_xy_area(g_s_s_r_crank_grid,link,g_s_s_r_offset_grid) #mm^2
+    xy_area = mechanism_xy_area(g_s_s_r_crank_grid, link, g_s_s_r_offset_grid) #mm^2
 #--------------
 
     batch_df = pd.DataFrame({
@@ -153,7 +155,7 @@ print(final_param_output)
 final_param_output.to_csv("parameters.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 
 #Kinematics Analysis
-angle_inputs_deg = np.arange(1,360+1,1, dtype='f8') #moved to 1 deg increments, 15 is too coarse to be useful
+angle_inputs_deg = np.arange(1,360+1,1, dtype='f8') #moved to 1 deg increments, 15 appeared too coarse to be useful
 
 angle_inputs_rad = np.deg2rad(angle_inputs_deg)
 
@@ -162,41 +164,60 @@ kinematic_data = []
 parameters_matrix = final_param_output[["Crank","Link","Offset"]].to_numpy()
 
 #Goes row by row through parameter combinations previously filtered, then calculates kinematics for each angle
+slider_mass = 0.5 #Kg
+friction_coefficient_mu = 0.1  
+
 for row in parameters_matrix:
-    for angle in angle_inputs_rad:
-        slider_mass = 0.5 #Kg
-        friction_coefficient_mu = 0.1  
-        crank = row[0]
-        link = row[1]
-        offset = row[2]
-        x_s = slider_displacement(crank, link, offset, angle) #unit
-        v_s = slider_velocity(crank, link, offset, angle) #unit/s
-        a_s = slider_acceleration(crank, link, offset, angle) #unit/s^2
-        phi = angle_phi(crank, link, offset, angle) #rad
-        link_force = link_reaction_force(slider_mass, a_s, phi, friction_coefficient_mu)
-        kinematic_batch =[
-            crank, #crank
-            link, #link
-            offset, #offset
-            np.rad2deg(angle), #theta, degrees
-            np.rad2deg(phi), #phi, degrees
-            normal_stress(link_force, 5, 5), #N, mm, mm --> MPa
-            crank_torque(link_force, crank, angle, phi), #Torque N.m
-            pin_shear_stress(link_force, 2), #N, mm^2 --> MPa
-            x_s, #Xs
-            v_s, #Vs
-            a_s #As
-            ]
-        kinematic_data.append(kinematic_batch)
+    crank, link, offset = row[0], row[1], row[2]
+    
+    x_s = slider_displacement(crank, link, offset, angle_inputs_rad) #unit
+    v_s = slider_velocity(crank, link, offset, angle_inputs_rad) #unit/s
+    a_s = slider_acceleration(crank, link, offset, angle_inputs_rad) #unit/s^2
+    phi = angle_phi(crank, link, offset, angle_inputs_rad) #rad
+    link_force = link_reaction_force(slider_mass, a_s, phi, friction_coefficient_mu) #Newton
+    torque = crank_torque(link_force, crank, angle_inputs_rad, phi) #Torque N.m
+
+    #copy crank/link/offset 360 times to fill columns to same length as other variables
+    crank_column = np.full_like(angle_inputs_rad, crank)
+    link_column = np.full_like(angle_inputs_rad, link)
+    offset_column = np.full_like(angle_inputs_rad, offset)
+
+    temp_batch_np = np.column_stack([
+        crank_column, #crank
+        link_column, #link
+        offset_column, #offset
+        np.rad2deg(angle_inputs_rad), #theta, degrees
+        np.rad2deg(phi), #phi, degrees
+        link_force, #N, force through connecting link
+        torque,
+        x_s, #Xs
+        v_s, #Vs
+        a_s #As
+        ])
+    
+    #find max values for parameters of interest (note: need to add minimum values as well)
+    max_link_force = temp_batch_np[:,5].max()
+    max_crank_torque = abs(temp_batch_np[:,6]).max() #absolute value since motor sizing depends on max power regardless of torque direction
+    max_v_s = temp_batch_np[:,8].max()
+    max_a_s = temp_batch_np[:,9].max()
+    peak_power = max_crank_torque*np.pi/30 #Watts
+
+    peak_values = [[1, 1, 1, 1, 1, max_link_force, max_crank_torque, 1, max_v_s,max_a_s], 
+                   [1, 1, 1, 1, 1, link_sizing(max_link_force,30*10**6), peak_power, 1, 1, 1]
+                   ]
+    
+    kinematic_data.extend(temp_batch_np.tolist())
+    kinematic_data.extend(peak_values)
+
+print(kinematic_data)
 
 final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius",
                                                                  "Link Length",
                                                                  "Offset",
                                                                  "Theta Angle",
                                                                  "Phi Angle",
-                                                                 "Link Normal Stress",
-                                                                 "Pin Shear",
-                                                                 "Torque",
+                                                                 "Link Force",
+                                                                 "Crank Torque",
                                                                  "Xs",
                                                                  "Vs",
                                                                  "As"]) #format final dataframe
@@ -206,7 +227,5 @@ print(final_kinematic_output)
 final_kinematic_output.to_csv("kinematics_dynamics.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 
 end_time = time.time()
-
 execution_time = end_time-start_time
-
-print('Program Execution time was ' + str(execution_time) + ' seconds')
+print('Program execution time was ' + f'{execution_time:.2f}' + ' seconds')
