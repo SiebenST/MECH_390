@@ -10,6 +10,14 @@ def f(x,y):
     z = x**2-y**2
     return z
 
+def normalize_data(dataset):
+    normalized_data = (dataset-dataset.min())/(dataset.max()-dataset.min())
+    return np.array(normalized_data).reshape(-1,1) #reshape(-1,1) flips the array from a row to a colum
+
+def denormalize_data(normalized_dataset, dataset_max, dataset_min):
+    denormalized_data = normalized_dataset*(dataset_max-dataset_min)+dataset_min
+    return denormalized_data
+
 #generate input dataset
 x_dataset = np.arange(-100,100,0.1)
 
@@ -24,44 +32,20 @@ z_train = f(x_train,y_train) #output training dataset
 
 z_val = f(x_val, y_val) #output validation dataset
 
-x_max = x_train.max()
-
-x_min = x_train.min()
-
-y_max = y_train.max()
-
-y_min = y_train.min()
-
-z_max = z_train.max()
-
-z_min = z_train.min()
-
-
-x_val_normalized = (x_val-x_min)/(x_max-x_min)
-
-y_val_normalized = (y_val-y_min)/(y_max-y_min)
-
-z_val_normalized = (z_val-z_min)/(z_max-z_min)
-
-x_train_normalized = (x_train-x_min)/(x_max-x_min)
-
-y_train_normalized = (y_train-y_min)/(y_max-y_min)
-
-z_train_normalized = (z_train-z_min)/(z_max-z_min)
-
-x_val_normalized = np.array(x_val_normalized).reshape(-1,1)
-
-y_val_normalized = np.array(y_val_normalized).reshape(-1,1)
-
-z_val_normalized = np.array(z_val_normalized).reshape(-1,1)
-
-x_train_normalized = np.array(x_train_normalized).reshape(-1,1)
-
-y_train_normalized = np.array(y_train_normalized).reshape(-1,1)
-
-z_train_normalized = np.array(z_train_normalized).reshape(-1,1)
-
 #normalize input data
+x_val_normalized = normalize_data(x_val)
+
+y_val_normalized = normalize_data(y_val)
+
+z_val_normalized = normalize_data(z_val)
+
+x_train_normalized = normalize_data(x_train)
+
+y_train_normalized = normalize_data(y_train)
+
+z_train_normalized = normalize_data(z_train)
+
+#Stack x and y columns widthwise
 train_dataset = np.column_stack(np.float32((x_train_normalized,y_train_normalized)))
 
 val_dataset = np.column_stack(np.float32((x_val_normalized, y_val_normalized)))
@@ -89,6 +73,33 @@ def train(input_data, output_target, optimizer, loss, n_epochs):
 
         print(str(epoch) + " Error: " + str(error))
 
+def train_target_error(input_data, output_target, optimizer, loss, r_squared_target):
+    inputs = torch.from_numpy(np.float32(input_data))
+    targets = torch.from_numpy(np.float32(output_target))
+    r_squared = 0
+    epochs = 0
+
+    while r_squared < r_squared_target:
+
+        epochs += 1
+
+        outputs = ANN_model_2(inputs)
+
+        error = loss(outputs, targets)
+
+        optimizer.zero_grad()
+
+        error.backward()
+
+        optimizer.step()
+
+        z_pred = ANN_model_2(torch.from_numpy(val_dataset)).detach().numpy()
+
+        r_squared  = test(z_val_normalized, z_pred)[1]
+
+        print('Epochs: ' + str(epochs) + ' Error: ' + str(error) + ' // RMSE: ' + str(test(z_val_normalized, z_pred)[0]) + ' --- R^2: ' + str(test(z_val_normalized, z_pred)[1]))
+    
+
 class ANN(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -109,6 +120,8 @@ class ANN(torch.nn.Module):
         return pred
 
 ANN_model = ANN().to('cpu')
+ANN_model_2 = ANN().to('cpu') 
+
 print(ANN_model)
 
 #------Model training--------
@@ -119,7 +132,6 @@ optimizer = torch.optim.Adam(ANN_model.parameters(), lr = 0.01) #parameters, lea
 train(train_dataset,z_train_normalized, optimizer, loss, 25)
 ANN_model.eval()
 z_pred_25_epoch = ANN_model(torch.from_numpy(val_dataset)).detach().numpy()
-
 
 #50 Epochs
 ANN_model.train()
@@ -133,39 +145,36 @@ train(train_dataset,z_train_normalized, optimizer, loss, 50)
 ANN_model.eval()
 z_pred_100_epoch = ANN_model(torch.from_numpy(val_dataset)).detach().numpy()
 
+#Doesn't work currently
+ANN_model_2.train()
+train_target_error(train_dataset,z_train_normalized, optimizer, loss, 0.99)
+ANN_model_2.eval()
+z_pred_r_squared_method = ANN_model_2(torch.from_numpy(val_dataset)).detach().numpy()
+
 
 print('25 Epochs // RMSE: ' + str(test(z_val_normalized,z_pred_25_epoch)[0]) + ' --- R^2: ' + str(test(z_val_normalized,z_pred_25_epoch)[1]))
 print('50 Epochs // RMSE: ' + str(test(z_val_normalized,z_pred_50_epoch)[0]) + ' --- R^2: ' + str(test(z_val_normalized,z_pred_50_epoch)[1]))
 print('100 Epochs // RMSE: ' + str(test(z_val_normalized,z_pred_100_epoch)[0]) + ' --- R^2 :' + str(test(z_val_normalized,z_pred_100_epoch)[1]))
 
-# plot_3d_normalized = plt.figure()
-# ax = plt.axes(projection='3d')
-# ax.scatter(x_val_normalized,y_val_normalized,z_val_normalized,'blue') #val_data
-# ax.scatter(x_val_normalized,y_val_normalized,z_pred_25_epoch,'red') #10 epoch
-# ax.scatter(x_val_normalized,y_val_normalized,z_pred_50_epoch,'orange') #50 epoch
-# ax.scatter(x_val_normalized,y_val_normalized,z_pred_100_epoch,'green') #100 epoch
-# ax.set_xlabel('x')
-# ax.set_ylabel('y')
-# ax.set_zlabel('z')
-# ax.set_title('ANN Predictions Compared to Actual Values (Normalized)')
-# ax.grid(True)
 
-z_val_denorm = z_val_normalized*(z_max-z_min)+z_min
+z_val_denorm = denormalize_data(z_val_normalized, z_val.max(), z_val.min())
 
-x_val_denorm = x_val_normalized*(x_max-x_min)+x_min
+x_val_denorm = denormalize_data(x_val_normalized, x_val.max(), x_val.min())
 
-z_pred_25_epoch_denorm = z_pred_25_epoch*(z_max-z_min)+z_min
+y_val_denorm = denormalize_data(y_val_normalized, y_val.max(), y_val.min())
 
-z_pred_50_epoch_denorm = z_pred_50_epoch*(z_max-z_min)+z_min
+z_pred_25_epoch_denorm = denormalize_data(z_pred_25_epoch, z_val.max(), z_val.min())
 
-z_pred_100_epoch_denorm = z_pred_100_epoch*(z_max-z_min)+z_min
+z_pred_50_epoch_denorm = denormalize_data(z_pred_50_epoch, z_val.max(), z_val.min())
+
+z_pred_100_epoch_denorm = denormalize_data(z_pred_100_epoch, z_val.max(), z_val.min())
 
 plot_3d_denormalized = plt.figure()
 ax = plt.axes(projection='3d')
-ax.scatter(x_val_normalized,y_val_normalized,z_val_denorm,'blue') #val_data
-ax.scatter(x_val_normalized,y_val_normalized,z_pred_25_epoch_denorm,'red') #25 epoch
-ax.scatter(x_val_normalized,y_val_normalized,z_pred_50_epoch_denorm,'orange') #50 epoch
-ax.scatter(x_val_normalized,y_val_normalized,z_pred_100_epoch_denorm,'green') #100 epoch
+ax.scatter(x_val_denorm,y_val_denorm,z_val_denorm,'blue') #val_data
+ax.scatter(x_val_denorm,y_val_denorm,z_pred_25_epoch_denorm,'red') #25 epoch
+ax.scatter(x_val_denorm,y_val_denorm,z_pred_50_epoch_denorm,'orange') #50 epoch
+ax.scatter(x_val_denorm,y_val_denorm,z_pred_100_epoch_denorm,'green') #100 epoch
 ax.set_xlabel('x')
 ax.set_ylabel('y')
 ax.set_zlabel('z')

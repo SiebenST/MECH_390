@@ -60,6 +60,14 @@ def link_reaction_force(slider_mass, slider_acceleration, angle_phi, coefficient
 def crank_torque(force_magnitude, crank_radius, theta_angle, phi_angle):
     torque = force_magnitude*crank_radius*(np.cos(phi_angle)*np.sin(theta_angle)+np.sin(phi_angle)*np.cos(theta_angle))
     return torque
+
+#Min link width for no buckling (Euler condition)
+def link_buckling(link_force, elastic_modulus, link_length, safety_factor):
+    max_allowable_load = abs(link_force*safety_factor)
+    min_inertia_moment = max_allowable_load*link_length**2/(np.pi**2*elastic_modulus)
+    min_link_width = (min_inertia_moment*12)**0.25
+    return min_link_width
+
 #--------------
 
 #np.arange creates an array of numbers with specified step size
@@ -160,14 +168,16 @@ angle_inputs_deg = np.arange(1,360+1,1, dtype='f8') #moved to 1 deg increments, 
 angle_inputs_rad = np.deg2rad(angle_inputs_deg)
 
 kinematic_data = []
+peak_data = []
 
 parameters_matrix = final_param_output[["Crank","Link","Offset"]].to_numpy()
 
 #Goes row by row through parameter combinations previously filtered, then calculates kinematics for each angle
 slider_mass = 0.5 #Kg
 friction_coefficient_mu = 0.1  
-
+index = 0
 for row in parameters_matrix:
+    index +=1
     crank, link, offset = row[0], row[1], row[2]
     
     x_s = slider_displacement(crank, link, offset, angle_inputs_rad) #unit
@@ -197,19 +207,19 @@ for row in parameters_matrix:
     
     #find max values for parameters of interest (note: need to add minimum values as well)
     max_link_force = temp_batch_np[:,5].max()
+    max_link_force_compressive = temp_batch_np[:,5].min()
     max_crank_torque = abs(temp_batch_np[:,6]).max() #absolute value since motor sizing depends on max power regardless of torque direction
     max_v_s = temp_batch_np[:,8].max()
     max_a_s = temp_batch_np[:,9].max()
     peak_power = max_crank_torque*np.pi/30 #Watts
+    max_allowable_stress = 30*10**6
+    link_width_normal = link_sizing(max_link_force, max_allowable_stress)
+    link_width_buckle = link_buckling(max_link_force_compressive, 69*10**9, link, 1.2)
 
-    peak_values = [[1, 1, 1, 1, 1, max_link_force, max_crank_torque, 1, max_v_s,max_a_s], 
-                   [1, 1, 1, 1, 1, link_sizing(max_link_force,30*10**6), peak_power, 1, 1, 1]
-                   ]
+    peak_values = [index, crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, link_width_normal, link_width_buckle]
     
     kinematic_data.extend(temp_batch_np.tolist())
-    kinematic_data.extend(peak_values)
-
-print(kinematic_data)
+    peak_data.append(peak_values)
 
 final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius",
                                                                  "Link Length",
@@ -222,9 +232,26 @@ final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius",
                                                                  "Vs",
                                                                  "As"]) #format final dataframe
 
+final_peak_output = pd.DataFrame(peak_data, columns= ["Index",
+                                                        "Crank Radius",
+                                                        "Link Length",
+                                                        "Offset",
+                                                        "Max Force",
+                                                        "Max Torque",
+                                                        "Max Velocity",
+                                                        "Max Acceleration",
+                                                        "Peak Power",
+                                                        "Min Link Width - Normal Stress",
+                                                        "Min Link Width - Buckling"]) #format final dataframe
+
+
 print(final_kinematic_output)
 
+print(final_peak_output)
+
 final_kinematic_output.to_csv("kinematics_dynamics.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
+
+final_peak_output.to_csv("peak_values.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 
 end_time = time.time()
 execution_time = end_time-start_time
