@@ -174,7 +174,9 @@ parameters_matrix = final_param_output[["Crank","Link","Offset"]].to_numpy()
 
 #Goes row by row through parameter combinations previously filtered, then calculates kinematics for each angle
 slider_mass = 0.5 #Kg
-friction_coefficient_mu = 0.1  
+friction_coefficient_mu = 0.1
+safety_factor = 1.3
+
 index = 0
 for row in parameters_matrix:
     index +=1
@@ -207,16 +209,19 @@ for row in parameters_matrix:
     
     #find max values for parameters of interest (note: need to add minimum values as well)
     max_link_force = temp_batch_np[:,5].max()
-    max_link_force_compressive = temp_batch_np[:,5].min()
+    max_link_force_compressive = temp_batch_np[:,5].min() #negative values are compressive, used to check for buckling
     max_crank_torque = abs(temp_batch_np[:,6]).max() #absolute value since motor sizing depends on max power regardless of torque direction
     max_v_s = temp_batch_np[:,8].max()
     max_a_s = temp_batch_np[:,9].max()
     peak_power = max_crank_torque*np.pi/30 #Watts
     max_allowable_stress = 30*10**6
+    elastic_modulus = 69*10**9
     link_width_normal = link_sizing(max_link_force, max_allowable_stress)
-    link_width_buckle = link_buckling(max_link_force_compressive, 69*10**9, link, 1.2)
+    link_width_buckle = link_buckling(max_link_force_compressive, elastic_modulus, link, safety_factor)
+    link_width = max(link_width_buckle, link_width_normal)
+    area = mechanism_xy_area(crank, link, offset)
 
-    peak_values = [index, crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, link_width_normal, link_width_buckle]
+    peak_values = [index, crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, link_width, area]
     
     kinematic_data.extend(temp_batch_np.tolist())
     peak_data.append(peak_values)
@@ -241,8 +246,9 @@ final_peak_output = pd.DataFrame(peak_data, columns= ["Index",
                                                         "Max Velocity",
                                                         "Max Acceleration",
                                                         "Peak Power",
-                                                        "Min Link Width - Normal Stress",
-                                                        "Min Link Width - Buckling"]) #format final dataframe
+                                                        "Min Link Width - Normal Stress or Buckling",
+                                                        "Cross-Sectional Area"
+                                                        ]) #format final dataframe
 
 
 print(final_kinematic_output)
