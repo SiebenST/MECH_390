@@ -1,10 +1,5 @@
 import pandas as pd
 import numpy as np
-import time
-
-start_time = time.time()
-
-delta_t = (1/180) #defining as global variable, unit is seconds
 
 #----- Function definitions -----
 
@@ -47,8 +42,8 @@ def link_sizing(link_force, allowable_stress):
 #Calculate required pin size for given pin load
 def pin_sizing(shear_force, allowable_stress):
     cross_sectional_area = shear_force/allowable_stress
-    pin_radius = np.sqrt(cross_sectional_area/np.pi)
-    return pin_radius
+    pin_dia = 2*np.sqrt(cross_sectional_area/np.pi)
+    return pin_dia
 
 #Calculate force going through link
 def link_reaction_force(slider_mass, slider_acceleration, angle_phi, coefficient_mu):
@@ -68,10 +63,33 @@ def link_buckling(link_force, elastic_modulus, link_length, safety_factor):
     min_link_width = (min_inertia_moment*12)**0.25
     return min_link_width
 
+#Min link width fatigue check, assuming 10^8 cycles, safety factor 1.3 
+def link_fatigue(max_link_force, min_link_force, n_cycles, safety_factor):
+    force_amplitude = (max_link_force-min_link_force)/2
+    s_n = (14479/n_cycles**0.5+96.5)*10**6 #Pa
+    min_allowable_area = force_amplitude/s_n*safety_factor
+    min_link_width = np.sqrt(min_allowable_area)
+    return min_link_width
+
+#Crank Bending
+def crank_bending(crank_torque, max_normal_stress):
+    min_crank_width = (6*crank_torque/max_normal_stress)**(1/3)
+    return min_crank_width
+
 #--------------
 
+#---------Aluminum Material Properties-------------
+modulus_of_elasticity = 69*10**9 #Pa
+tensile_yield_strength = 276*10**6 #Pa
+#Other Properties
+safety_factor = 1.3
+slider_mass = 0.5 #Kg
+friction_coefficient_mu = 0.1
+delta_t = (1/180) #defining as global variable, unit is seconds
+#--------------------------------------------------
+
 #np.arange creates an array of numbers with specified step size
-#Currently just creating all possible combinations, then doing a sweep and filtering out parameters which don't meet criteria
+#Creates a range of possible combinations, then doing a sweep and filtering out parameters which don't meet criteria
 
 crank_length = np.arange(100,300,0.5, dtype='f8')*10**-3 #Range of all possible crank lengths to check, syntax is (min,max,step)
 
@@ -173,9 +191,6 @@ peak_data = []
 parameters_matrix = final_param_output[["Crank","Link","Offset"]].to_numpy()
 
 #Goes row by row through parameter combinations previously filtered, then calculates kinematics for each angle
-slider_mass = 0.5 #Kg
-friction_coefficient_mu = 0.1
-safety_factor = 1.3
 
 index = 0
 for row in parameters_matrix:
@@ -214,17 +229,25 @@ for row in parameters_matrix:
     max_v_s = temp_batch_np[:,8].max()
     max_a_s = temp_batch_np[:,9].max()
     peak_power = max_crank_torque*np.pi/30 #Watts
-    max_allowable_stress = 30*10**6
-    elastic_modulus = 69*10**9
+
+    max_allowable_stress = 30*10**6 #Pa
+    elastic_modulus = 69*10**9 #6061-T6
+
     link_width_normal = link_sizing(max_link_force, max_allowable_stress)
     link_width_buckle = link_buckling(max_link_force_compressive, elastic_modulus, link, safety_factor)
-    link_width = max(link_width_buckle, link_width_normal)
-    area = mechanism_xy_area(crank, link, offset)
+    link_width_fatigue = link_fatigue(max_link_force_compressive, max_link_force, 10**8, 1.3)
+    min_link_width = max(link_width_buckle, link_width_normal, link_width_fatigue)
 
-    peak_values = [index, crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, link_width, area]
+    area = mechanism_xy_area(crank, link, offset)
+    min_crank_width = crank_bending(max_crank_torque, max_allowable_stress)
+    min_pin_dia = pin_sizing(max_link_force, max_allowable_stress)
+
+    peak_values = [index, crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, min_link_width, min_crank_width, min_pin_dia, area]
     
     kinematic_data.extend(temp_batch_np.tolist())
-    peak_data.append(peak_values)
+
+    if max_crank_torque < 200 and min_pin_dia < 0.7*min_link_width and min_pin_dia < 0.7*min_crank_width: #filter out extreme torque values
+        peak_data.append(peak_values)  #Cross compare to required link width. If pin dia is too large relative to link width, discard configuration 
 
 final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius",
                                                                  "Link Length",
@@ -246,7 +269,9 @@ final_peak_output = pd.DataFrame(peak_data, columns= ["Index",
                                                         "Max Velocity",
                                                         "Max Acceleration",
                                                         "Peak Power",
-                                                        "Min Link Width - Normal Stress or Buckling",
+                                                        "Min Link Width - Normal Stress/Buckling",
+                                                        "Min Crank Width",
+                                                        "Min Pin Diameter",
                                                         "Cross-Sectional Area"
                                                         ]) #format final dataframe
 
@@ -258,7 +283,3 @@ print(final_peak_output)
 final_kinematic_output.to_csv("kinematics_dynamics.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 
 final_peak_output.to_csv("peak_values.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
-
-end_time = time.time()
-execution_time = end_time-start_time
-print('Program execution time was ' + f'{execution_time:.2f}' + ' seconds')
