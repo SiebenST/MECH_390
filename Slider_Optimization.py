@@ -1,4 +1,5 @@
 import torch
+import pickle
 
 class ANN(torch.nn.Module):
     def __init__(self, n_inputs, n_outputs):
@@ -21,9 +22,12 @@ ann_model = ANN(3,7).to('cpu')
 ann_model.load_state_dict(torch.load("ANN_Model.pt", weights_only=True))
 ann_model.eval()
 
+output_scaler = pickle.load(open('scaler.pkl', 'rb'))
+
 with torch.no_grad():
-    input_tensor = torch.tensor([[0.114, 0.172, 0.0485], [0.114, 0.122, 0.005], [0.104, 0.132, 0.003]]) #crank, link, offset
+    input_tensor = torch.tensor([0.11, 0.162, 0.049]) #crank, link, offset
     results = ann_model(input_tensor).numpy()
+    scaled_results = output_scaler.inverse_transform(results)
 
 print(results)
     

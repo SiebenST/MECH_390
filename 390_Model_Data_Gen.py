@@ -43,7 +43,6 @@ def link_reaction_force(slider_mass, slider_acceleration, slider_velocity, angle
     velocity_sign = np.sign(slider_velocity+1e-9)
     # Add 0.5kg to effective slider mass if pushing forward
     effective_mass = slider_mass + np.where(slider_velocity > 0, 0.5, 0.0)
-    
     link_reaction_force = ((effective_mass * slider_acceleration) + (velocity_sign * coefficient_mu * effective_mass * 9.81))/(np.cos(angle_phi) - (velocity_sign * coefficient_mu * np.sin(angle_phi)))
     return link_reaction_force
 
@@ -77,10 +76,15 @@ def equivalent_reversed_stress(stress_amplitude, mean_stress, aluminum_ultimate_
     equivalent_stress = stress_amplitude/(1-(mean_stress/aluminum_ultimate_tensile_strength)**2) #Pa
     return equivalent_stress
 
-def optimization_function(power_input, power_ideal, power_importance, size_input, size_ideal, size_importance):
+def optimization_function(power_input, power_ideal, power_importance, size_input, size_ideal, size_importance, return_ratio, return_ratio_ideal, return_ratio_importance):
     '''Scores design based on weighted factors, perfect score is 1 (100%)'''
-    optimization_score = power_ideal/power_input*power_importance + size_ideal/size_input*size_importance
+    optimization_score = power_ideal/power_input*power_importance + size_ideal/size_input*size_importance + return_ratio/return_ratio_ideal*return_ratio_importance
     return optimization_score
+
+def stroke_distance(crank, link, offset): #may end up unused, only relevant if we decide to expand design sweep in order to train a broader ann model
+    '''Returns stroke distance for given geometrical parameters'''
+    stroke = np.sqrt((crank + link)**2 - offset**2)-np.sqrt((crank - link)**2 - offset**2)
+    return stroke
 
 #Other Properties
 omega = np.pi #30rpm * (2pi rad) / rotation * 1min / 60s = pi rad/s
@@ -141,7 +145,7 @@ for link in link_length: #loops through all link length values, combined with ab
 
     #Calculating square roots avoiding program error by masking out any negative values
     stroke = np.sqrt(stroke_condition_term_1[stroke_condition_positive_mask])-np.sqrt(stroke_condition_term_2[stroke_condition_positive_mask])
-
+    
     stroke_mask = (stroke >= 249.5*10**-3) & (stroke <= 250.5*10**-3) #the tolerance here drastically affects the amount of parameter sets which filter through
 
     if not np.any(stroke_mask):
@@ -185,9 +189,9 @@ final_param_output.to_csv("parameters.csv", index=False, float_format='%.4f') #e
 angle_inputs_deg = np.arange(0, 360, angle_step_size, dtype='f8') #moved to 1 deg increments, 15 appeared too coarse to be useful
 angle_inputs_rad = np.deg2rad(angle_inputs_deg)
 
-pin_sizes = np.arange(2.0,15,0.5, dtype='f8')*10**-3 #range of possible pin sizes, to be checked against loading for max allowable stress
-link_depth_sizes = np.arange(2.0,30,0.5, dtype='f8')*10**-3
-crank_depth_sizes = np.arange(2.0,30,0.5, dtype='f8')*10**-3
+pin_sizes = np.arange(0.01,1,0.01, dtype='f8')*10**-3 #range of possible pin sizes, to be checked against loading for max allowable stress, starts at 4 from mcmaster-carr
+link_depth_sizes = np.arange(0.01,1,0.01, dtype='f8')*10**-3
+crank_depth_sizes = np.arange(0.01,1,0.01, dtype='f8')*10**-3
 
 kinematic_data = [] #all data output
 peak_data = [] #peak values of each parameter set + filtering out certain criteria
@@ -304,10 +308,10 @@ for row in parameters_matrix:
     
     min_pin_dia = min(valid_pins)
 
-    valid_links_depths = valid_links_depths[valid_links_depths > 2.25*min_pin_dia] #size check between pin and link to ensure no tearing of link at pin hole. This should maybe be higher to account for bearing sizing?
+    #valid_links_depths = valid_links_depths[valid_links_depths > 2.25*min_pin_dia] #size check between pin and link to ensure no tearing of link at pin hole. This should maybe be higher to account for bearing sizing?
 
-    if not np.any(valid_links_depths):
-        continue
+    #if not np.any(valid_links_depths):
+    #    continue
 
     min_link_depth = min(valid_links_depths)
 
@@ -319,8 +323,8 @@ for row in parameters_matrix:
     peak_power = max_crank_torque*np.pi #P = T*w, [W] -> 30 rotations/minute * 2pi rad/rotation * 1 minute/60s = pi rad/s
     area = mechanism_xy_area(crank, link, offset)
     return_ratio = return_ratio_calc(crank, link, offset)
-
-    peak_values = [crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, min_link_depth, min_crank_depth, min_pin_dia, return_ratio, area]
+    stroke_length = stroke_distance(crank, link, offset)
+    peak_values = [crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, min_link_depth, min_crank_depth, min_pin_dia, return_ratio, area, stroke_length]
     
     kinematic_data.extend(temp_batch_np.tolist())
     if peak_power < 2:
@@ -349,13 +353,18 @@ final_peak_output = pd.DataFrame(peak_data, columns= ["Crank Radius",
                                                         "Min Crank Depth",
                                                         "Min Pin Diameter",
                                                         "Return Ratio",
-                                                        "Cross-Sectional Area"
+                                                        "Cross-Sectional Area",
+                                                        "Stroke"
                                                         ]) #format final dataframe
 
 minimum_area = final_peak_output["Cross-Sectional Area"].min()
 minimum_power = final_peak_output["Peak Power"].min()
+max_return_ratio = final_peak_output["Return Ratio"].max()
 
-final_peak_output["Optimization Score"] = optimization_function(final_peak_output["Peak Power"], minimum_power, 0.5, final_peak_output["Cross-Sectional Area"], minimum_area, 0.5)
+
+final_peak_output["Optimization Score"] = optimization_function(final_peak_output["Peak Power"], minimum_power, 0.4, 
+                                                                final_peak_output["Cross-Sectional Area"], minimum_area, 0.4, 
+                                                                final_peak_output["Return Ratio"], max_return_ratio, 0.2)
 
 final_peak_output_sorted = final_peak_output.sort_values(by = "Optimization Score", ascending=False)
 

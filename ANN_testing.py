@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import sklearn
 import matplotlib.pyplot as plt
+import pickle
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -55,7 +56,7 @@ def train_target_loss(input_data, output_target, optimizer, loss_function, loss_
     validation_error = float('inf')
     best_validation_loss = float('inf')
     epochs_no_improvement = 0
-    early_stop_counter = 100 #number of epochs with no improvement required before ending training
+    early_stop_counter = 200 #number of epochs with no improvement required before ending training
     epochs = 0
 
     ann_model.train()
@@ -98,13 +99,13 @@ class ANN(torch.nn.Module):
     def __init__(self, n_inputs, n_outputs):
         super().__init__()
         self.layer_stack = torch.nn.Sequential(
-            torch.nn.Linear(n_inputs,64), #Number of inputs to layer / Number of outputs from layer
+            torch.nn.Linear(n_inputs,32), #Number of inputs to layer / Number of outputs from layer
             torch.nn.ReLU(), #outputs zero for any value < 0, outputs input value for values > 0
-            #torch.nn.Dropout(p=0.05),
-            torch.nn.Linear(64,32),
+            torch.nn.Dropout(p=0.1),
+            torch.nn.Linear(32,16),
             torch.nn.ReLU(),
-            #torch.nn.Dropout(p=0.05),
-            torch.nn.Linear(32,n_outputs)
+            torch.nn.Dropout(p=0.1),
+            torch.nn.Linear(16,n_outputs)
         )
 
     def forward(self, input): #runs forward pass through network
@@ -150,6 +151,7 @@ print("="*60)
 
 #save model weights for later reuse
 torch.save(slider_ann_model.state_dict(), "ANN_Model.pt")
+pickle.dump(output_scaler, open('scalers.pkl', 'wb')) #saves output scaler for reuse
 
 #Plotting training progress
 plot_data_training = np.array(training_error_vs_epoch)
