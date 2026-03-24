@@ -21,7 +21,7 @@ input_columns = ["Crank Radius", "Link Length", "Offset"]
 input_dataset = doe_dataset[input_columns].to_numpy().astype(np.float32)
 
 #output values
-output_columns = ["Peak Power", "Min Link Width", "Min Crank Width", "Min Pin Diameter", "Return Ratio", "Cross-Sectional Area"]
+output_columns = ["Peak Power", "Min Link Depth", "Min Crank Depth", "Min Pin Diameter", "Return Ratio", "Cross-Sectional Area", "Optimization Score"]
 output_dataset = doe_dataset[output_columns].to_numpy().astype(np.float32)
 
 number_inputs = input_dataset.shape[1] #counts columns of dataset
@@ -100,10 +100,10 @@ class ANN(torch.nn.Module):
         self.layer_stack = torch.nn.Sequential(
             torch.nn.Linear(n_inputs,64), #Number of inputs to layer / Number of outputs from layer
             torch.nn.ReLU(), #outputs zero for any value < 0, outputs input value for values > 0
-            torch.nn.Dropout(p=0.05),
+            #torch.nn.Dropout(p=0.05),
             torch.nn.Linear(64,32),
             torch.nn.ReLU(),
-            torch.nn.Dropout(p=0.05),
+            #torch.nn.Dropout(p=0.05),
             torch.nn.Linear(32,n_outputs)
         )
 
@@ -131,7 +131,8 @@ model_outputs_denorm = output_scaler.inverse_transform(model_outputs_norm)
 
 results_table = np.column_stack([testing_inputs, model_outputs_denorm, testing_outputs])
 
-results_table_df = pd.DataFrame(results_table, columns= ["Crank Radius", "Link Length", "Offset", "Peak Power", "Min Link Width", "Min Crank Width", "Min Pin Diameter", "Return Ratio", "Cross-Sectional Area", "Real Peak Power", "Real Min Link Width", "Real Min Crank Width", "Real Min Pin Diameter", "Real Return Ratio", "Real Cross-Sectional Area"])
+results_table_df = pd.DataFrame(results_table, columns= ["Crank Radius", "Link Length", "Offset", "Peak Power", "Min Link Depth", "Min Crank Depth", "Min Pin Diameter", "Return Ratio", "Cross-Sectional Area", "Optimization Score",
+                                                          "Real Peak Power", "Real Min Link Depth", "Real Min Crank Depth", "Real Min Pin Diameter", "Real Return Ratio", "Real Cross-Sectional Area", "Real Optimization Score"])
 
 sorted_results_df = results_table_df.sort_values(by = "Crank Radius", ascending=True)
 sorted_results_df.to_csv("Model_Predictions.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
@@ -185,8 +186,8 @@ plt.ylabel('Predicted Value')
 plt.title('Model Predictions Vs Validation - Peak Power')
 plt.grid(True)
 
-link_width_prediction = sorted_results_df["Min Link Width"].to_numpy()
-link_width_validation = sorted_results_df["Real Min Link Width"].to_numpy()
+link_width_prediction = sorted_results_df["Min Link Depth"].to_numpy()
+link_width_validation = sorted_results_df["Real Min Link Depth"].to_numpy()
 
 plt.figure(4)
 plt.plot(link_width_prediction, 's', label = 'Prediction')
@@ -194,7 +195,7 @@ plt.plot(link_width_validation, 's', label = 'Validation')
 plt.legend()
 plt.xlabel('Index')
 plt.ylabel('Predicted Value')
-plt.title('Model Predictions Vs Validation - Link Width')
+plt.title('Model Predictions Vs Validation - Link Depth')
 plt.grid(True)
 
 area_prediction = sorted_results_df["Cross-Sectional Area"].to_numpy()

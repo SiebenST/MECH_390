@@ -52,21 +52,23 @@ def crank_torque(force_magnitude, crank_radius, theta_angle, phi_angle):
     torque = force_magnitude*crank_radius*(np.cos(phi_angle)*np.sin(theta_angle)+np.sin(phi_angle)*np.cos(theta_angle))
     return torque
 
-def link_buckling(link_force, aluminum_elastic_modulus, link_length, safety_factor):
-    '''Min link width for no buckling (Euler condition)'''
-    max_allowable_load = abs(link_force*safety_factor)
-    min_inertia_moment = max_allowable_load*link_length**2/(np.pi**2*aluminum_elastic_modulus)
-    min_link_width = (min_inertia_moment*12)**0.25
-    return min_link_width
+def link_buckling(link_width, link_depth, aluminum_elastic_modulus, link_length, safety_factor):
+    '''Max allowable compressive force for no buckling (Euler condition)'''
+    inertia_moment_width = link_depth*link_width**3/12
+    inertia_moment_depth = link_width*link_depth**3/12
+    min_inertia_moment = min(inertia_moment_width, inertia_moment_depth)
+    critical_load = np.pi**2*aluminum_elastic_modulus*min_inertia_moment/link_length**2
+    allowable_load = critical_load/safety_factor
+    return allowable_load
  
 def fatigue_strength(n_cycles):
     '''6061-T6 fatigue strength for given number of cycles, taken from https://www.osti.gov/servlets/purl/10157028'''
     fatigue_strength = (14479/n_cycles**0.5+96.5)*10**6 #Pa
     return fatigue_strength
 
-def crank_bending(crank_torque, crank_width):
+def crank_bending(crank_torque, crank_width, crank_depth):
     '''Crank Bending Stress'''
-    normal_stress = (6*crank_torque/crank_width**3)
+    normal_stress = 6*crank_torque / (crank_width*crank_depth**2)
     return normal_stress
 
 #Gerber formula
@@ -75,6 +77,10 @@ def equivalent_reversed_stress(stress_amplitude, mean_stress, aluminum_ultimate_
     equivalent_stress = stress_amplitude/(1-(mean_stress/aluminum_ultimate_tensile_strength)**2) #Pa
     return equivalent_stress
 
+def optimization_function(power_input, power_ideal, power_importance, size_input, size_ideal, size_importance):
+    '''Scores design based on weighted factors, perfect score is 1 (100%)'''
+    optimization_score = power_ideal/power_input*power_importance + size_ideal/size_input*size_importance
+    return optimization_score
 
 #Other Properties
 omega = np.pi #30rpm * (2pi rad) / rotation * 1min / 60s = pi rad/s
@@ -92,6 +98,7 @@ aluminum_tensile_yield_strength = 276*10**6 #Pa
 aluminum_ultimate_tensile_strength = 310*10**6 #Pa
 aluminum_fatigue_strength = fatigue_strength(cycle_count)
 max_allowable_stress = aluminum_fatigue_strength/safety_factor
+global_link_width = 5*10**-3 #m, selected based on commonly available bar stock
 
 
 #np.arange creates an array of numbers with specified step size
@@ -179,8 +186,8 @@ angle_inputs_deg = np.arange(0, 360, angle_step_size, dtype='f8') #moved to 1 de
 angle_inputs_rad = np.deg2rad(angle_inputs_deg)
 
 pin_sizes = np.arange(2.0,15,0.5, dtype='f8')*10**-3 #range of possible pin sizes, to be checked against loading for max allowable stress
-link_width_sizes = np.arange(2.0,30,0.5, dtype='f8')*10**-3
-crank_width_sizes = np.arange(5.0,30,0.5, dtype='f8')*10**-3
+link_depth_sizes = np.arange(2.0,30,0.5, dtype='f8')*10**-3
+crank_depth_sizes = np.arange(2.0,30,0.5, dtype='f8')*10**-3
 
 kinematic_data = [] #all data output
 peak_data = [] #peak values of each parameter set + filtering out certain criteria
@@ -253,57 +260,58 @@ for row in parameters_matrix:
     if not np.any(valid_pins):
         continue
 
-    valid_links = []
+    valid_links_depths = []
 
-    for width in link_width_sizes:
-        link_mean_stress = average_link_force/width**2
-        link_stress_amplitude = link_force_amplitude/width**2
+    for depth in link_depth_sizes:
+        link_mean_stress = average_link_force / (depth*global_link_width)
+        link_stress_amplitude = link_force_amplitude / (depth*global_link_width)
+
         # Fatigue check (Gerber)
         link_equivalent_stress = equivalent_reversed_stress(link_stress_amplitude, link_mean_stress, aluminum_ultimate_tensile_strength)
         fatigue_check = link_equivalent_stress < aluminum_fatigue_strength / safety_factor
 
         # Static yield check
-        link_max_normal_stress = max_link_force / width**2
+        link_max_normal_stress = max_link_force / (depth*global_link_width)
         static_check = link_max_normal_stress < aluminum_tensile_yield_strength / safety_factor
 
-        if fatigue_check == True and static_check == True and width > link_buckling(max_link_force_compressive, aluminum_elastic_modulus, link, safety_factor): # Fatigue/Static/Buckling
-            valid_links.append(width)
+        if fatigue_check == True and static_check == True and max_link_force_compressive < link_buckling(global_link_width, depth, aluminum_elastic_modulus, link, safety_factor): # Fatigue/Static/Buckling
+            valid_links_depths.append(depth)
 
-    valid_links = np.array(valid_links)
-    if not np.any(valid_links):
+    valid_links_depths = np.array(valid_links_depths)
+    if not np.any(valid_links_depths):
         continue
     
-    valid_crank_widths = []
+    valid_crank_depths = []
 
-    for width in crank_width_sizes:
-        crank_mean_stress = crank_bending(average_crank_torque, width) #don't think this is valid, consider as placeholder for now
-        crank_stress_amplitude = crank_bending(crank_torque_amplitude, width)
+    for depth in crank_depth_sizes:
+        crank_mean_stress = crank_bending(average_crank_torque, global_link_width, depth) #don't think this is valid, consider as placeholder for now
+        crank_stress_amplitude = crank_bending(crank_torque_amplitude, global_link_width, depth)
 
         # Fatigue check (Gerber)
         crank_equivalent_stress = equivalent_reversed_stress(crank_stress_amplitude, crank_mean_stress, aluminum_ultimate_tensile_strength)
         fatigue_check = crank_equivalent_stress < aluminum_fatigue_strength / safety_factor
 
         # Static yield check
-        crank_max_normal_stress = crank_bending(max_crank_torque, width)
+        crank_max_normal_stress = crank_bending(max_crank_torque, global_link_width, depth)
         static_check = crank_max_normal_stress < aluminum_tensile_yield_strength / safety_factor
 
         if fatigue_check == True and static_check == True:
-            valid_crank_widths.append(width)
+            valid_crank_depths.append(depth)
 
-    valid_crank_widths = np.array(valid_crank_widths)
-    if not np.any(valid_crank_widths):
+    valid_crank_depths = np.array(valid_crank_depths)
+    if not np.any(valid_crank_depths):
         continue
     
     min_pin_dia = min(valid_pins)
 
-    valid_links = valid_links[valid_links > 2.25*min_pin_dia] #size check between pin and link to ensure no tearing of link at pin hole. This should maybe be higher to account for bearing sizing?
+    valid_links_depths = valid_links_depths[valid_links_depths > 2.25*min_pin_dia] #size check between pin and link to ensure no tearing of link at pin hole. This should maybe be higher to account for bearing sizing?
 
-    if not np.any(valid_links):
+    if not np.any(valid_links_depths):
         continue
 
-    min_link_width = min(valid_links)
+    min_link_depth = min(valid_links_depths)
 
-    min_crank_width=min(valid_crank_widths)
+    min_crank_depth=min(valid_crank_depths)
 
     max_crank_torque = abs(temp_batch_np[:,6]).max() #absolute value since motor sizing depends on max power regardless of torque direction
     max_v_s = temp_batch_np[:,8].max()
@@ -312,7 +320,7 @@ for row in parameters_matrix:
     area = mechanism_xy_area(crank, link, offset)
     return_ratio = return_ratio_calc(crank, link, offset)
 
-    peak_values = [crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, min_link_width, min_crank_width, min_pin_dia, return_ratio, area]
+    peak_values = [crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, min_link_depth, min_crank_depth, min_pin_dia, return_ratio, area]
     
     kinematic_data.extend(temp_batch_np.tolist())
     if peak_power < 2:
@@ -337,17 +345,24 @@ final_peak_output = pd.DataFrame(peak_data, columns= ["Crank Radius",
                                                         "Max Velocity",
                                                         "Max Acceleration",
                                                         "Peak Power",
-                                                        "Min Link Width",
-                                                        "Min Crank Width",
+                                                        "Min Link Depth",
+                                                        "Min Crank Depth",
                                                         "Min Pin Diameter",
                                                         "Return Ratio",
                                                         "Cross-Sectional Area"
                                                         ]) #format final dataframe
 
+minimum_area = final_peak_output["Cross-Sectional Area"].min()
+minimum_power = final_peak_output["Peak Power"].min()
+
+final_peak_output["Optimization Score"] = optimization_function(final_peak_output["Peak Power"], minimum_power, 0.5, final_peak_output["Cross-Sectional Area"], minimum_area, 0.5)
+
+final_peak_output_sorted = final_peak_output.sort_values(by = "Optimization Score", ascending=False)
+
 print(final_kinematic_output)
 
-print(final_peak_output)
+print(final_peak_output_sorted)
 
 final_kinematic_output.to_csv("kinematics_dynamics.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 
-final_peak_output.to_csv("peak_values.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
+final_peak_output_sorted.to_csv("peak_values.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
