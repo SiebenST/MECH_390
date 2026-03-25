@@ -22,7 +22,7 @@ input_columns = ["Crank Radius", "Link Length", "Offset"]
 input_dataset = doe_dataset[input_columns].to_numpy().astype(np.float32)
 
 #output values
-output_columns = ["Peak Power", "Min Link Depth", "Min Crank Depth", "Min Pin Diameter", "Return Ratio", "Cross-Sectional Area", "Optimization Score"]
+output_columns = ["Peak Power", "Min Link Height", "Min Crank Height", "Min Pin Diameter", "Return Ratio", "Cross-Sectional Area", "Optimization Score"]
 output_dataset = doe_dataset[output_columns].to_numpy().astype(np.float32)
 
 number_inputs = input_dataset.shape[1] #counts columns of dataset
@@ -52,7 +52,7 @@ def train_target_loss(input_data, output_target, optimizer, loss_function, loss_
     inputs = torch.from_numpy(np.float32(input_data)).to(device)
     targets = torch.from_numpy(np.float32(output_target)).to(device)
     
-    training_error = 1
+    training_error = float('inf')
     validation_error = float('inf')
     best_validation_loss = float('inf')
     epochs_no_improvement = 0
@@ -121,7 +121,7 @@ loss_function = torch.nn.MSELoss()
 optimizer = torch.optim.AdamW(slider_ann_model.parameters(), lr = 0.001, weight_decay=0.05) #parameters, learning rate
 loss_threshold = 0.0001
 
-training_error_vs_epoch, validation_error_vs_epoch = train_target_loss(training_inputs_norm, training_outputs_norm, optimizer, loss_function, loss_threshold, slider_ann_model, 100000, validation_inputs_norm, validation_outputs_norm)
+training_error_vs_epoch, validation_error_vs_epoch = train_target_loss(training_inputs_norm, training_outputs_norm, optimizer, loss_function, loss_threshold, slider_ann_model, 10000, validation_inputs_norm, validation_outputs_norm)
 
 testing_inputs_norm_tensor = torch.tensor(testing_inputs_norm, dtype=torch.float32).to(device) #necessary when using gpu, have to send val data in tensor form over to gpu
 with torch.no_grad(): #reduces memory usage when evaluating model, disables gradient calculation
@@ -132,9 +132,12 @@ model_outputs_denorm = output_scaler.inverse_transform(model_outputs_norm)
 
 results_table = np.column_stack([testing_inputs, model_outputs_denorm, testing_outputs])
 
-results_table_df = pd.DataFrame(results_table, columns= ["Crank Radius", "Link Length", "Offset", "Peak Power", "Min Link Depth", "Min Crank Depth", "Min Pin Diameter", "Return Ratio", "Cross-Sectional Area", "Optimization Score",
-                                                          "Real Peak Power", "Real Min Link Depth", "Real Min Crank Depth", "Real Min Pin Diameter", "Real Return Ratio", "Real Cross-Sectional Area", "Real Optimization Score"])
+actual_outputs_names =[]
+for i in range(0, len(output_columns)): 
+    actual_outputs_names.append("Actual " + output_columns[i]) 
 
+results_table_df = pd.DataFrame(results_table, columns= input_columns + output_columns + actual_outputs_names)
+                                                         
 sorted_results_df = results_table_df.sort_values(by = "Crank Radius", ascending=True)
 sorted_results_df.to_csv("Model_Predictions.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 print(sorted_results_df)
@@ -174,42 +177,6 @@ plt.legend()
 plt.xlabel('Epoch Count')
 plt.ylabel('Mean Squared Error')
 plt.title('Training Error vs Validation Error - Log Scale')
-plt.grid(True)
-
-peak_power_prediction = sorted_results_df["Peak Power"].to_numpy()
-peak_power_validation = sorted_results_df["Real Peak Power"].to_numpy()
-
-plt.figure(3)
-plt.plot(peak_power_prediction, 's', label = 'Prediction')
-plt.plot(peak_power_validation, 's', label = 'Validation')
-plt.legend()
-plt.xlabel('Index')
-plt.ylabel('Predicted Value')
-plt.title('Model Predictions Vs Validation - Peak Power')
-plt.grid(True)
-
-link_width_prediction = sorted_results_df["Min Link Depth"].to_numpy()
-link_width_validation = sorted_results_df["Real Min Link Depth"].to_numpy()
-
-plt.figure(4)
-plt.plot(link_width_prediction, 's', label = 'Prediction')
-plt.plot(link_width_validation, 's', label = 'Validation')
-plt.legend()
-plt.xlabel('Index')
-plt.ylabel('Predicted Value')
-plt.title('Model Predictions Vs Validation - Link Depth')
-plt.grid(True)
-
-area_prediction = sorted_results_df["Cross-Sectional Area"].to_numpy()
-area_validation = sorted_results_df["Real Cross-Sectional Area"].to_numpy()
-
-plt.figure(5)
-plt.plot(area_prediction, 's', label = 'Prediction')
-plt.plot(area_validation, 's', label = 'Validation')
-plt.legend()
-plt.xlabel('Index')
-plt.ylabel('Predicted Value')
-plt.title('Model Predictions Vs Validation - Area')
 plt.grid(True)
 
 # Parity plots: predicted vs actual for each output

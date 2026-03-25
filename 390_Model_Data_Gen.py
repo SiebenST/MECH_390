@@ -51,11 +51,11 @@ def crank_torque(force_magnitude, crank_radius, theta_angle, phi_angle):
     torque = force_magnitude*crank_radius*(np.cos(phi_angle)*np.sin(theta_angle)+np.sin(phi_angle)*np.cos(theta_angle))
     return torque
 
-def link_buckling(link_width, link_depth, aluminum_elastic_modulus, link_length, safety_factor):
+def link_buckling(link_width, link_height, aluminum_elastic_modulus, link_length, safety_factor):
     '''Max allowable compressive force for no buckling (Euler condition)'''
-    inertia_moment_width = link_depth*link_width**3/12
-    inertia_moment_depth = link_width*link_depth**3/12
-    min_inertia_moment = min(inertia_moment_width, inertia_moment_depth)
+    inertia_moment_width = link_height*link_width**3/12
+    inertia_moment_height = link_width*link_height**3/12
+    min_inertia_moment = min(inertia_moment_width, inertia_moment_height)
     critical_load = np.pi**2*aluminum_elastic_modulus*min_inertia_moment/link_length**2
     allowable_load = critical_load/safety_factor
     return allowable_load
@@ -65,9 +65,9 @@ def fatigue_strength(n_cycles):
     fatigue_strength = (14479/n_cycles**0.5+96.5)*10**6 #Pa
     return fatigue_strength
 
-def crank_bending(crank_torque, crank_width, crank_depth):
+def crank_bending(crank_torque, crank_width, crank_height):
     '''Crank Bending Stress'''
-    normal_stress = 6*crank_torque / (crank_width*crank_depth**2)
+    normal_stress = 6*crank_torque / (crank_width*crank_height**2)
     return normal_stress
 
 #Gerber formula
@@ -108,78 +108,65 @@ global_link_width = 5*10**-3 #m, selected based on commonly available bar stock
 #np.arange creates an array of numbers with specified step size
 #Creates a range of possible combinations, then doing a sweep and filtering out parameters which don't meet criteria
 crank_length = np.arange(100,300,0.5, dtype='f8')*10**-3 #Range of all possible crank lengths to check, syntax is (min,max,step)
-
 link_length = np.arange(100,300,0.5, dtype='f8')*10**-3 #using dtype='f8', a.k.a fp64 in order to maintain max precision. f4 (fp32) might be faster
-
 offset = np.arange(0.5,50,0.5, dtype='f8')*10**-3 #Using step size of 0.5mm for all lengths, could be adjusted up/down based on machining tolerance & whatnot
 
-crank_grid, offset_grid = np.meshgrid(crank_length, offset) #meshgrid creates two large matrices. 
-#The first input vector is taken as a row which is then copied vertically a number of times equal to the second vector's length. 
-#The second input vector is taken as a column, which is then copied horizontally a number of times equal to the first vector's length
-#End result is that picking a matrix coordinate and looking at both matrices will give a different combination of the initial input vectors' values
+crank_tensor, link_tensor, offset_tensor = np.meshgrid(crank_length, link_length, offset) #gets all permutations of parameter inputs
 
-filtered_parameters = [] #Parameters which pass all filter steps end up in here
+#-------------Parameter Filtering-------------------------
+valid_cranks = crank_tensor
+valid_links = link_tensor
+valid_offsets = offset_tensor
 
-for link in link_length: #loops through all link length values, combined with above matrices ends up doing full sweep of all permutations
-    valid_cranks = crank_grid
-    valid_offsets = offset_grid
-    #Grashof condition check
-    grashof_mask = (valid_cranks + valid_offsets <= link)
+#Grashof condition check
+grashof_mask = (valid_cranks + valid_offsets <= valid_links)
 
-    if not np.any(grashof_mask):
-        continue
+valid_cranks = valid_cranks[grashof_mask]
+valid_links = valid_links[grashof_mask]
+valid_offsets = valid_offsets[grashof_mask]
 
-    valid_cranks = valid_cranks[grashof_mask]
-    valid_offsets = valid_offsets[grashof_mask]
-    
-    #Stroke distance condition check
-    stroke_condition_term_1 = (valid_cranks + link)**2 - valid_offsets**2
+#Stroke distance condition check
+stroke_condition_term_1 = (valid_cranks + valid_links)**2 - valid_offsets**2
 
-    stroke_condition_term_2 = (valid_cranks - link)**2 - valid_offsets**2
+stroke_condition_term_2 = (valid_cranks - valid_links)**2 - valid_offsets**2
 
-    #Checking for which values the terms in the square root are positive (i.e physically possible)
-    stroke_condition_positive_mask = (stroke_condition_term_1 >= 0) & (stroke_condition_term_2 >= 0)
+#Checking for which values the terms in the square root are positive (i.e physically possible)
+stroke_condition_positive_mask = (stroke_condition_term_1 >= 0) & (stroke_condition_term_2 >= 0)
 
-    valid_cranks = valid_cranks[stroke_condition_positive_mask]
-    valid_offsets = valid_offsets[stroke_condition_positive_mask]
+valid_cranks = valid_cranks[stroke_condition_positive_mask]
+valid_links = valid_links[stroke_condition_positive_mask]
+valid_offsets = valid_offsets[stroke_condition_positive_mask]
 
-    #Calculating square roots avoiding program error by masking out any negative values
-    stroke = np.sqrt(stroke_condition_term_1[stroke_condition_positive_mask])-np.sqrt(stroke_condition_term_2[stroke_condition_positive_mask])
-    
-    stroke_mask = (stroke >= 249.5*10**-3) & (stroke <= 250.5*10**-3) #the tolerance here drastically affects the amount of parameter sets which filter through
+#Calculating square roots avoiding program error by masking out any negative values
+stroke = np.sqrt(stroke_condition_term_1[stroke_condition_positive_mask])-np.sqrt(stroke_condition_term_2[stroke_condition_positive_mask])
 
-    if not np.any(stroke_mask):
-        continue
+stroke_mask = (stroke >= 249.9*10**-3) & (stroke <= 250.1*10**-3) #the tolerance here drastically affects the amount of parameter sets which filter through
 
-    valid_cranks = valid_cranks[stroke_mask]
-    valid_offsets = valid_offsets[stroke_mask]
+valid_cranks = valid_cranks[stroke_mask]
+valid_links = valid_links[stroke_mask]
+valid_offsets = valid_offsets[stroke_mask]
 
-    #Calculate return ratio
-    return_ratio = return_ratio_calc(valid_cranks, link, valid_offsets)
+#Calculate return ratio
+return_ratio = return_ratio_calc(valid_cranks, valid_links, valid_offsets)
 
-    return_ratio_mask = (return_ratio >= 1.5) & (return_ratio <= 2.5) #filters for minium return ratio within specified range. This is left uncapped and any extreme values are filtered out later during stress analysis
+return_ratio_mask = (return_ratio >= 1.5) & (return_ratio <= 2.5) #filters for minium return ratio within specified range.
 
-    if not np.any(return_ratio_mask):
-        continue
+valid_cranks = valid_cranks[return_ratio_mask]
+valid_links = valid_links[return_ratio_mask]
+valid_offsets = valid_offsets[return_ratio_mask]
 
-    valid_cranks = valid_cranks[return_ratio_mask]
-    valid_offsets = valid_offsets[return_ratio_mask]
+#Calculate cross-sectional area of crank-slider mechanism
+xy_area = mechanism_xy_area(valid_cranks, valid_links, valid_offsets)
 
-    #Calculate cross-sectional area of crank-slider mechanism
-    xy_area = mechanism_xy_area(valid_cranks, link, valid_offsets)
-
-    #create dataframe of all data in batch
-    batch_df = pd.DataFrame({
-        "Crank": valid_cranks,
-        "Link": link,
-        "Offset": valid_offsets,
-        "Return Ratio": return_ratio[return_ratio_mask], 
-        "Cross Sectional Area": xy_area
-    }) 
-
-    filtered_parameters.append(batch_df)
-
-final_param_output = pd.concat(filtered_parameters, ignore_index=True) #format final dataframe
+#create dataframe of all data in batch
+final_param_output = pd.DataFrame({
+    "Crank": valid_cranks,
+    "Link": valid_links,
+    "Offset": valid_offsets,
+    "Return Ratio": return_ratio[return_ratio_mask], 
+    "Cross Sectional Area": xy_area,
+    "Stroke": stroke_distance(valid_links, valid_cranks, valid_offsets)
+}) 
 
 print(final_param_output)
 
@@ -189,20 +176,20 @@ final_param_output.to_csv("parameters.csv", index=False, float_format='%.4f') #e
 angle_inputs_deg = np.arange(0, 360, angle_step_size, dtype='f8') #moved to 1 deg increments, 15 appeared too coarse to be useful
 angle_inputs_rad = np.deg2rad(angle_inputs_deg)
 
-pin_sizes = np.arange(0.01,1,0.01, dtype='f8')*10**-3 #range of possible pin sizes, to be checked against loading for max allowable stress, starts at 4 from mcmaster-carr
-link_depth_sizes = np.arange(0.01,1,0.01, dtype='f8')*10**-3
-crank_depth_sizes = np.arange(0.01,1,0.01, dtype='f8')*10**-3
+pin_sizes = np.arange(0.01,10,0.01, dtype='f8')*10**-3 #range of possible pin sizes, to be checked against loading for max allowable stress, starts at 4 from mcmaster-carr
+link_height_sizes = np.arange(0.01,10,0.01, dtype='f8')*10**-3
+crank_height_sizes = np.arange(0.01,10,0.01, dtype='f8')*10**-3
 
 kinematic_data = [] #all data output
 peak_data = [] #peak values of each parameter set + filtering out certain criteria
 
-parameters_matrix = final_param_output[["Crank","Link","Offset"]].to_numpy()
-
 #Goes row by row through parameter combinations previously filtered, then calculates kinematics for each angle
 
-for row in parameters_matrix:
+for row in range(0,len(valid_cranks)):
 
-    crank, link, offset = row[0], row[1], row[2]
+    crank = valid_cranks[row] 
+    link = valid_links[row]
+    offset = valid_offsets[row]
     
     x_s = slider_displacement(crank, link, offset, angle_inputs_rad) #unit
     v_s = slider_velocity(crank, link, offset, angle_inputs_rad, delta_t) #unit/s
@@ -231,7 +218,7 @@ for row in parameters_matrix:
     
     #find peak values for parameters of interest
     max_link_force = temp_batch_np[:,5].max()
-    max_link_force_compressive = temp_batch_np[:,5].min() #negative values are compressive, used to check for buckling
+    max_link_force_compressive = abs(temp_batch_np[:,5].min()) #negative values are compressive, used to check for buckling
 
     average_link_force = (max_link_force+max_link_force_compressive)/2
     link_force_amplitude = (max_link_force-max_link_force_compressive)/2
@@ -264,58 +251,58 @@ for row in parameters_matrix:
     if not np.any(valid_pins):
         continue
 
-    valid_links_depths = []
+    min_pin_dia = min(valid_pins)
 
-    for depth in link_depth_sizes:
-        link_mean_stress = average_link_force / (depth*global_link_width)
-        link_stress_amplitude = link_force_amplitude / (depth*global_link_width)
+    valid_links_heights = []
+
+    for height in link_height_sizes:
+        link_mean_stress = average_link_force / (height*global_link_width)
+        link_stress_amplitude = link_force_amplitude / (height*global_link_width)
 
         # Fatigue check (Gerber)
         link_equivalent_stress = equivalent_reversed_stress(link_stress_amplitude, link_mean_stress, aluminum_ultimate_tensile_strength)
         fatigue_check = link_equivalent_stress < aluminum_fatigue_strength / safety_factor
 
         # Static yield check
-        link_max_normal_stress = max_link_force / (depth*global_link_width)
+        link_max_normal_stress = max_link_force / (height*global_link_width)
         static_check = link_max_normal_stress < aluminum_tensile_yield_strength / safety_factor
 
-        if fatigue_check == True and static_check == True and max_link_force_compressive < link_buckling(global_link_width, depth, aluminum_elastic_modulus, link, safety_factor): # Fatigue/Static/Buckling
-            valid_links_depths.append(depth)
+        if fatigue_check == True and static_check == True and max_link_force_compressive < link_buckling(global_link_width, height, aluminum_elastic_modulus, link, safety_factor): # Fatigue/Static/Buckling
+            valid_links_heights.append(height)
 
-    valid_links_depths = np.array(valid_links_depths)
-    if not np.any(valid_links_depths):
-        continue
+    valid_links_heights = np.array(valid_links_heights)
+
+    valid_links_heights = valid_links_heights[valid_links_heights > 2.25 * min_pin_dia] #size check between pin and link to ensure no tearing of link at pin hole. This should maybe be higher to account for bearing sizing?
     
-    valid_crank_depths = []
+    if not np.any(valid_links_heights):
+        continue
+    min_link_height = min(valid_links_heights)
 
-    for depth in crank_depth_sizes:
-        crank_mean_stress = crank_bending(average_crank_torque, global_link_width, depth) #don't think this is valid, consider as placeholder for now
-        crank_stress_amplitude = crank_bending(crank_torque_amplitude, global_link_width, depth)
+    valid_crank_heights = []
+
+    for height in crank_height_sizes:
+        crank_mean_stress = crank_bending(average_crank_torque, global_link_width, height) #don't think this is valid, consider as placeholder for now
+        crank_stress_amplitude = crank_bending(crank_torque_amplitude, global_link_width, height)
 
         # Fatigue check (Gerber)
         crank_equivalent_stress = equivalent_reversed_stress(crank_stress_amplitude, crank_mean_stress, aluminum_ultimate_tensile_strength)
         fatigue_check = crank_equivalent_stress < aluminum_fatigue_strength / safety_factor
 
         # Static yield check
-        crank_max_normal_stress = crank_bending(max_crank_torque, global_link_width, depth)
+        crank_max_normal_stress = crank_bending(max_crank_torque, global_link_width, height)
         static_check = crank_max_normal_stress < aluminum_tensile_yield_strength / safety_factor
 
         if fatigue_check == True and static_check == True:
-            valid_crank_depths.append(depth)
-
-    valid_crank_depths = np.array(valid_crank_depths)
-    if not np.any(valid_crank_depths):
-        continue
+            valid_crank_heights.append(height)
     
-    min_pin_dia = min(valid_pins)
+    valid_crank_heights = np.array(valid_crank_heights)
 
-    #valid_links_depths = valid_links_depths[valid_links_depths > 2.25*min_pin_dia] #size check between pin and link to ensure no tearing of link at pin hole. This should maybe be higher to account for bearing sizing?
+    valid_crank_heights = valid_crank_heights[valid_crank_heights > 2.25 * min_pin_dia] #size check between pin and link to ensure no tearing of link at pin hole. This should maybe be higher to account for bearing sizing?
+    
+    if not np.any(valid_crank_heights):
+        continue
 
-    #if not np.any(valid_links_depths):
-    #    continue
-
-    min_link_depth = min(valid_links_depths)
-
-    min_crank_depth=min(valid_crank_depths)
+    min_crank_height=min(valid_crank_heights)
 
     max_crank_torque = abs(temp_batch_np[:,6]).max() #absolute value since motor sizing depends on max power regardless of torque direction
     max_v_s = temp_batch_np[:,8].max()
@@ -324,7 +311,7 @@ for row in parameters_matrix:
     area = mechanism_xy_area(crank, link, offset)
     return_ratio = return_ratio_calc(crank, link, offset)
     stroke_length = stroke_distance(crank, link, offset)
-    peak_values = [crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, min_link_depth, min_crank_depth, min_pin_dia, return_ratio, area, stroke_length]
+    peak_values = [crank, link, offset, max_link_force, max_crank_torque, max_v_s, max_a_s, peak_power, min_link_height, min_crank_height, min_pin_dia, return_ratio, area, stroke_length]
     
     kinematic_data.extend(temp_batch_np.tolist())
     if peak_power < 2:
@@ -349,8 +336,8 @@ final_peak_output = pd.DataFrame(peak_data, columns= ["Crank Radius",
                                                         "Max Velocity",
                                                         "Max Acceleration",
                                                         "Peak Power",
-                                                        "Min Link Depth",
-                                                        "Min Crank Depth",
+                                                        "Min Link Height",
+                                                        "Min Crank Height",
                                                         "Min Pin Diameter",
                                                         "Return Ratio",
                                                         "Cross-Sectional Area",
@@ -374,4 +361,4 @@ print(final_peak_output_sorted)
 
 final_kinematic_output.to_csv("kinematics_dynamics.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
 
-final_peak_output_sorted.to_csv("peak_values.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
+final_peak_output_sorted.to_csv("peak_values.csv", index=False, float_format='%.7f') #exports data to a .csv spreadsheet
