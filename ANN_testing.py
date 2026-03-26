@@ -22,7 +22,7 @@ input_columns = ["Crank Radius", "Link Length", "Offset"]
 input_dataset = doe_dataset[input_columns].to_numpy().astype(np.float32)
 
 #output values
-output_columns = ["Peak Power", "Min Link Height", "Min Crank Height", "Min Pin Diameter", "Return Ratio", "Cross-Sectional Area", "Optimization Score"]
+output_columns = ["Peak Power", "Min Link Height", "Min Link Width", "Min Crank Height", "Min Crank Width", "Min Pin Diameter", "Return Ratio", "System Area", "System Weight", "Optimization Score"]
 output_dataset = doe_dataset[output_columns].to_numpy().astype(np.float32)
 
 number_inputs = input_dataset.shape[1] #counts columns of dataset
@@ -56,7 +56,7 @@ def train_target_loss(input_data, output_target, optimizer, loss_function, loss_
     validation_error = float('inf')
     best_validation_loss = float('inf')
     epochs_no_improvement = 0
-    early_stop_counter = 200 #number of epochs with no improvement required before ending training
+    early_stop_counter = 100 #number of epochs with no improvement required before ending training
     epochs = 0
 
     ann_model.train()
@@ -138,8 +138,8 @@ for i in range(0, len(output_columns)):
 
 results_table_df = pd.DataFrame(results_table, columns= input_columns + output_columns + actual_outputs_names)
                                                          
-sorted_results_df = results_table_df.sort_values(by = "Crank Radius", ascending=True)
-sorted_results_df.to_csv("Model_Predictions.csv", index=False, float_format='%.4f') #exports data to a .csv spreadsheet
+sorted_results_df = results_table_df.sort_values(by = "Optimization Score", ascending=False)
+sorted_results_df.to_csv("Model_Predictions.csv", index=False, float_format='%.10f') #exports data to a .csv spreadsheet
 print(sorted_results_df)
 
 for i, col_name in enumerate(output_columns):
@@ -181,7 +181,7 @@ plt.grid(True)
 
 # Parity plots: predicted vs actual for each output
 n_outputs = len(output_columns)
-fig2, axes2 = plt.subplots(2, 4, figsize=(20, 10))
+fig2, axes2 = plt.subplots(3, 4, figsize=(20, 10))
 axes2 = axes2.flatten()
 
 for i, col_name in enumerate(output_columns):
