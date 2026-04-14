@@ -332,28 +332,6 @@ for row in range(0,len(valid_cranks)):
     if bearing_stress(min_pin_dia, max(min_link_width, min_crank_width), absolute_max_link_force) > aluminum_bearing_strength / safety_factor:
         min_pin_dia = absolute_max_link_force / (bearing_stress(min_pin_dia, max(min_link_width, min_crank_width), absolute_max_link_force) * max(min_link_width, min_crank_width))
 
-    #----Pin Length to dia check
-    # pin_length_dia = (min_crank_width+min_link_width) / min_pin_dia
-    # if pin_length_dia > 4:
-    #     min_pin_dia = (min_crank_width+min_link_width)/4
-    #     print("pin aspect trigger")
-
-    #     #-------Crank Height relative to pin size check----------
-    #     if min_crank_height < 2.25 * min_pin_dia: #size check between pin and link. Picking 2.25 allow us to consider Kt = 1 (from petersons stress concentration): Note from Chart 4.79 that the hole does not weaken the beam for d/H <~ 0.45. For design purposes, Ktg = 1 for d/H <~ 0.45.
-    #         min_crank_height = 2.25*min_pin_dia
-    #         min_crank_width = min_crank_height/link_aspect_ratio
-    #         #print("Pin condition triggered - Crank")
-        
-    #         min_crank_area = min_crank_width * min_crank_height
-
-    #         #-------Link Height relative to pin size check----------
-    #     if min_link_height < 2.25 * min_pin_dia: #size check between pin and link
-    #         min_link_height = 2.25*min_pin_dia
-    #         min_link_width = min_link_height/link_aspect_ratio
-    #         #print("Pin condition triggered - Link")
-    #         min_link_area = min_link_width*min_link_height
-
-
     # ================================================================
     #  BEARING STRESS CONVERGENCE LOOP — PIN-PRIORITY -Section Written By Claude Opus 4.6
     #
