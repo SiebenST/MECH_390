@@ -478,7 +478,7 @@ for row in range(0,len(valid_cranks)):
                    min_crank_height, min_crank_width, min_pin_dia, return_ratio, area, stroke_length, system_weight, volume]
     
     kinematic_data.extend(temp_batch_np.tolist()) #uncomment if full kinematics are desired for analysis
-    if peak_power < 1.2:
+    if peak_power < 1:
         peak_data.append(peak_values)  
 
 final_kinematic_output = pd.DataFrame(kinematic_data, columns= ["Crank Radius",
